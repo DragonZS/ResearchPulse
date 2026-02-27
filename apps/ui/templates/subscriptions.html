@@ -1,0 +1,529 @@
+{% extends "base.html" %}
+
+{% block title %}订阅管理 - ResearchPulse{% endblock %}
+
+{% block extra_styles %}
+<style>
+    .container { max-width: 1200px; margin: 0 auto; padding: 24px; }
+    .page-header { margin-bottom: 24px; }
+    .page-header h2 { font-size: 24px; color: #1a1a2e; margin-bottom: 8px; }
+    .page-header p { color: #666; font-size: 14px; }
+
+    .tabs { display: flex; gap: 4px; background: white; padding: 4px; border-radius: 12px; margin-bottom: 24px; flex-wrap: wrap; }
+    .tab { padding: 12px 24px; border: none; background: transparent; border-radius: 8px; font-size: 14px; cursor: pointer; transition: all 0.2s; }
+    .tab:hover { background: #f5f5f5; }
+    .tab.active { background: #1a1a2e; color: white; }
+
+    .content-card { background: white; border-radius: 12px; padding: 24px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); }
+
+    .section-title { font-size: 16px; font-weight: 600; color: #1a1a2e; margin-bottom: 16px; display: flex; justify-content: space-between; align-items: center; }
+    .section-title .count { font-size: 13px; color: #888; font-weight: 400; }
+
+    .search-box { display: flex; gap: 12px; margin-bottom: 20px; align-items: center; }
+    .search-box input { flex: 1; padding: 12px 16px; border: 1px solid #e0e0e0; border-radius: 8px; font-size: 14px; }
+    .search-box input:focus { outline: none; border-color: #4ecdc4; }
+
+    .item-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 12px; }
+    .item-card { display: flex; align-items: center; gap: 12px; padding: 16px; border: 1px solid #e0e0e0; border-radius: 10px; transition: all 0.2s; }
+    .item-card:hover { border-color: #4ecdc4; box-shadow: 0 2px 8px rgba(0,0,0,0.06); }
+    .item-card.subscribed { border-color: #4ecdc4; background: #f0fdfb; }
+    .item-card.inactive { opacity: 0.7; border-style: dashed; }
+
+    .item-icon { width: 44px; height: 44px; border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: 600; color: white; flex-shrink: 0; }
+    .item-icon.arxiv { background: #b31b1b; }
+    .item-icon.rss { background: #f39c12; }
+    .item-icon.wechat { background: #07c160; }
+    .item-icon.weibo { background: #e6162d; }
+    .item-icon.hackernews { background: #ff6600; }
+    .item-icon.reddit { background: #ff4500; }
+    .item-icon.twitter { background: #1da1f2; }
+    .item-icon.cs { background: #3b82f6; }
+    .item-icon.math { background: #8b5cf6; }
+    .item-icon.phys { background: #ef4444; }
+    .item-icon.stat { background: #10b981; }
+    .item-icon.other { background: #6b7280; }
+
+    .item-info { flex: 1; min-width: 0; }
+    .item-name { font-size: 14px; font-weight: 500; color: #1a1a2e; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .item-desc { font-size: 12px; color: #888; margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .item-badge { display: inline-block; font-size: 11px; padding: 1px 6px; border-radius: 4px; margin-left: 6px; vertical-align: middle; }
+    .item-badge.inactive { background: #f3f4f6; color: #9ca3af; }
+    .item-badge.active { background: #dcfce7; color: #16a34a; }
+
+    .item-action { flex-shrink: 0; }
+    .btn { padding: 8px 16px; border-radius: 6px; font-size: 13px; cursor: pointer; transition: all 0.2s; border: none; }
+    .btn-subscribe { background: #4ecdc4; color: white; }
+    .btn-subscribe:hover { background: #3dbdb5; }
+    .btn-unsubscribe { background: #fee2e2; color: #dc2626; }
+    .btn-unsubscribe:hover { background: #fecaca; }
+
+    .form-group { margin-bottom: 16px; }
+    .form-group label { display: block; font-size: 13px; font-weight: 500; margin-bottom: 6px; }
+    .form-input { width: 100%; padding: 12px; border: 1px solid #e0e0e0; border-radius: 8px; font-size: 14px; }
+    .form-input:focus { outline: none; border-color: #4ecdc4; }
+
+    .validation-success { background: #dcfce7; color: #059669; padding: 12px; border-radius: 8px; margin-top: 12px; }
+    .validation-error { background: #fee2e2; color: #dc2626; padding: 12px; border-radius: 8px; margin-top: 12px; }
+
+    .stats-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 24px; }
+    .stat-card { background: white; border-radius: 12px; padding: 20px; text-align: center; }
+    .stat-value { font-size: 32px; font-weight: 600; color: #1a1a2e; }
+    .stat-label { font-size: 13px; color: #888; margin-top: 4px; }
+
+    @media (max-width: 768px) {
+        .container { padding: 16px; }
+        .page-header h2 { font-size: 20px; }
+        .page-header p { font-size: 13px; }
+        .tabs { overflow-x: auto; -webkit-overflow-scrolling: touch; padding: 4px; gap: 2px; }
+        .tab { padding: 10px 16px; font-size: 13px; white-space: nowrap; }
+        .stats-row { grid-template-columns: 1fr; gap: 12px; }
+        .stat-card { padding: 16px; }
+        .stat-value { font-size: 24px; }
+        .search-box { flex-direction: column; gap: 8px; }
+        .search-box input { padding: 10px 14px; }
+        .item-grid { grid-template-columns: 1fr; }
+        .item-card { padding: 12px; }
+        .item-icon { width: 40px; height: 40px; font-size: 12px; }
+        .item-name { font-size: 13px; }
+        .item-desc { font-size: 11px; }
+        .btn { padding: 8px 12px; font-size: 12px; }
+        .content-card { padding: 16px; }
+        .modal-content { width: 100%; max-width: 100%; border-radius: 0; padding: 24px; }
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container">
+    <div class="page-header">
+        <h2>订阅管理</h2>
+        <p>管理你关注的内容源，个性化你的资讯流</p>
+    </div>
+
+    <div class="stats-row" id="stats-row">
+        <div class="stat-card">
+            <div class="stat-value" id="stat-arxiv">0</div>
+            <div class="stat-label">ArXiv 订阅</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-value" id="stat-rss">0</div>
+            <div class="stat-label">RSS 订阅</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-value" id="stat-other">0</div>
+            <div class="stat-label">其他订阅</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-value" id="stat-total">0</div>
+            <div class="stat-label">总订阅数</div>
+        </div>
+    </div>
+
+    <div class="tabs">
+        <button class="tab active" onclick="switchTab('arxiv')">ArXiv 类目</button>
+        <button class="tab" onclick="switchTab('rss')">RSS 源</button>
+        <button class="tab" onclick="switchTab('wechat')">微信公众号</button>
+        <button class="tab" onclick="switchTab('weibo')">微博热搜</button>
+        <button class="tab" onclick="switchTab('hackernews')">HackerNews</button>
+        <button class="tab" onclick="switchTab('reddit')">Reddit</button>
+        <button class="tab" onclick="switchTab('twitter')">Twitter</button>
+        <button class="tab" onclick="switchTab('add-rss')" style="background: #4ecdc4; color: white;">+ 添加 RSS 源</button>
+    </div>
+
+    <div class="content-card" id="main-content">
+        <div class="search-box">
+            <input type="text" id="search-input" placeholder="搜索 ArXiv/RSS/微信..." oninput="debouncedSearch()">
+            <span id="search-hint" style="font-size: 12px; color: #888;"></span>
+        </div>
+
+        <div class="section-title">
+            <span id="section-label">ArXiv 类目</span>
+            <span class="count" id="item-count">0 项</span>
+        </div>
+
+        <div class="item-grid" id="item-grid">
+            <div class="empty-state">
+                <div class="icon">&#9203;</div>
+                <div class="text">加载中...</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Add RSS Feed Card -->
+    <div class="content-card" id="add-rss-content" style="display: none;">
+        <div class="section-title">
+            <span>添加自定义 RSS 源</span>
+            <span style="color: #888; font-size: 13px; font-weight: 400;">提交后需等待管理员审批</span>
+        </div>
+        
+        <div class="form-group">
+            <label>RSS Feed URL *</label>
+            <input type="url" id="new-feed-url" class="form-input" placeholder="https://example.com/feed.xml">
+        </div>
+        
+        <div class="form-group">
+            <label>标题（可选）</label>
+            <input type="text" id="new-feed-title" class="form-input" placeholder="留空则自动从 Feed 中获取">
+        </div>
+        
+        <div class="form-group">
+            <label>分类</label>
+            <input type="text" id="new-feed-category" class="form-input" value="用户添加">
+        </div>
+        
+        <div style="display: flex; gap: 12px;">
+            <button class="btn" onclick="validateRssFeed()" style="background: #6b7280; color: white;">验证</button>
+            <button class="btn btn-subscribe" onclick="submitRssFeed()">提交</button>
+        </div>
+        
+        <div id="validation-result" style="margin-top: 16px; display: none;"></div>
+    </div>
+</div>
+
+<!-- Login Modal -->
+<div class="modal" id="login-modal">
+    <div class="modal-content">
+        <div class="modal-header">
+            <h2>请先登录</h2>
+            <span class="modal-close" onclick="hideModal()">&times;</span>
+        </div>
+        <div class="modal-body">
+            <p style="color: #666; margin-bottom: 16px;">订阅功能需要登录后使用</p>
+            <input type="text" id="login-username" placeholder="用户名">
+            <input type="password" id="login-password" placeholder="密码">
+            <button onclick="doLogin()">登录</button>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    const NAV_ACTIVE = 'subscriptions';
+    let currentTab = 'arxiv';
+    let currentUser = null;
+    let userSubscriptions = new Set();
+    let allItems = [];
+    let isSearchMode = false;
+    let searchDebounceTimer = null;
+    let featureStatus = {};
+
+    async function checkAuthState() {
+        try {
+            const fsRes = await fetch(`${API_BASE}/feature-status`);
+            if (fsRes.ok) featureStatus = await fsRes.json();
+        } catch(e) {}
+
+        const token = localStorage.getItem('access_token');
+        if (!token) { showLoginModal(); return; }
+
+        try {
+            const res = await fetch(`${AUTH_BASE}/auth/me`, { headers: { 'Authorization': `Bearer ${token}` } });
+            if (res.ok) {
+                currentUser = await res.json();
+                updateAuthUI();
+                loadSubscriptions();
+                loadItems();
+            } else {
+                localStorage.removeItem('access_token');
+                showLoginModal();
+            }
+        } catch (e) { showLoginModal(); }
+    }
+
+    function updateAuthUI() {
+        document.getElementById('auth-area').innerHTML = `<span class="user-info">&#128100; ${currentUser.username}</span><a href="#" onclick="logout()">退出</a>`;
+
+        const navMenu = document.getElementById('nav-menu');
+        let navHtml = `<a href="${APP_BASE}/">首页</a>`;
+        navHtml += `<a href="${APP_BASE}/subscriptions" class="active">订阅管理</a>`;
+        if (currentUser.is_superuser || featureStatus.event_clustering) navHtml += `<a href="${APP_BASE}/events">事件聚类</a>`;
+        if (currentUser.is_superuser || featureStatus.topic_radar) navHtml += `<a href="${APP_BASE}/topics">话题趋势</a>`;
+        if (currentUser.is_superuser || featureStatus.action_items) navHtml += `<a href="${APP_BASE}/actions">行动建议</a>`;
+        if (currentUser.is_superuser || featureStatus.report_generation) navHtml += `<a href="${APP_BASE}/reports">报告中心</a>`;
+        navHtml += `<a href="${APP_BASE}/daily-reports">每日报告</a>`;
+        if (currentUser.is_superuser) navHtml += `<a href="${APP_BASE}/admin">管理后台</a>`;
+        navMenu.innerHTML = navHtml;
+    }
+
+    function showLoginModal() { document.getElementById('login-modal').classList.add('active'); }
+    function hideModal() { document.getElementById('login-modal').classList.remove('active'); }
+
+    async function doLogin() {
+        const username = document.getElementById('login-username').value;
+        const password = document.getElementById('login-password').value;
+        try {
+            const res = await fetch(`${AUTH_BASE}/auth/login`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ username, password })
+            });
+            const data = await res.json();
+            if (res.ok) {
+                localStorage.setItem('access_token', data.access_token);
+                hideModal();
+                checkAuthState();
+            } else { alert(data.detail || '登录失败'); }
+        } catch (e) { alert('网络错误'); }
+    }
+
+    function logout() { localStorage.removeItem('access_token'); location.href = APP_BASE + '/'; }
+
+    async function loadSubscriptions() {
+        try {
+            const token = localStorage.getItem('access_token');
+            const res = await fetch(`${API_BASE}/subscriptions`, { headers: { 'Authorization': `Bearer ${token}` } });
+            const data = await res.json();
+            userSubscriptions = new Set(data.subscriptions.filter(s => s.is_active).map(s => `${s.source_type}:${s.source_id}`));
+            updateStats();
+        } catch (e) { console.error('Failed to load subscriptions:', e); }
+    }
+
+    function updateStats() {
+        let arxiv = 0, rss = 0, other = 0;
+        userSubscriptions.forEach(s => {
+            if (s.startsWith('arxiv_category:')) arxiv++;
+            else if (s.startsWith('rss_feed:')) rss++;
+            else other++;
+        });
+        document.getElementById('stat-arxiv').textContent = arxiv;
+        document.getElementById('stat-rss').textContent = rss;
+        document.getElementById('stat-other').textContent = other;
+        document.getElementById('stat-total').textContent = arxiv + rss + other;
+    }
+
+    function switchTab(tab) {
+        currentTab = tab;
+        isSearchMode = false;
+        document.getElementById('search-input').value = '';
+        document.getElementById('search-hint').textContent = '';
+        document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.textContent.toLowerCase().includes(tab)));
+        
+        if (tab === 'add-rss') {
+            document.getElementById('main-content').style.display = 'none';
+            document.getElementById('add-rss-content').style.display = 'block';
+            document.getElementById('validation-result').style.display = 'none';
+        } else {
+            document.getElementById('main-content').style.display = 'block';
+            document.getElementById('add-rss-content').style.display = 'none';
+            loadItems();
+        }
+    }
+
+    async function validateRssFeed() {
+        const feedUrl = document.getElementById('new-feed-url').value;
+        const resultDiv = document.getElementById('validation-result');
+        if (!feedUrl) { resultDiv.className = 'validation-error'; resultDiv.innerHTML = '请输入 RSS Feed URL'; resultDiv.style.display = 'block'; return; }
+        
+        const token = localStorage.getItem('access_token');
+        resultDiv.innerHTML = '正在验证...'; resultDiv.style.display = 'block';
+        
+        try {
+            const res = await fetch(`${API_BASE}/feeds/validate`, {
+                method: 'POST',
+                headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+                body: JSON.stringify({ feed_url: feedUrl })
+            });
+            const data = await res.json();
+            if (data.valid) {
+                resultDiv.className = 'validation-success';
+                resultDiv.innerHTML = `<strong>&#10003; 验证成功</strong><br><strong>标题:</strong> ${escapeHtml(data.title || '未知')}<br><strong>描述:</strong> ${escapeHtml(data.description || '无')}`;
+                if (!document.getElementById('new-feed-title').value && data.title) document.getElementById('new-feed-title').value = data.title;
+            } else {
+                resultDiv.className = 'validation-error';
+                resultDiv.innerHTML = `<strong>&#10007; 验证失败</strong><br>${escapeHtml(data.error || '未知错误')}`;
+            }
+        } catch (e) { resultDiv.className = 'validation-error'; resultDiv.innerHTML = '验证失败，请检查 URL 是否正确'; }
+    }
+
+    async function submitRssFeed() {
+        const feedUrl = document.getElementById('new-feed-url').value;
+        const title = document.getElementById('new-feed-title').value;
+        const category = document.getElementById('new-feed-category').value;
+        if (!feedUrl) { alert('请输入 RSS Feed URL'); return; }
+        
+        const token = localStorage.getItem('access_token');
+        try {
+            const res = await fetch(`${API_BASE}/feeds/add`, {
+                method: 'POST',
+                headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+                body: JSON.stringify({ feed_url: feedUrl, title: title || null, category })
+            });
+            const data = await res.json();
+            if (res.ok) {
+                alert(data.message || 'RSS 源已提交，等待管理员审批');
+                document.getElementById('new-feed-url').value = '';
+                document.getElementById('new-feed-title').value = '';
+                document.getElementById('validation-result').style.display = 'none';
+                switchTab('rss');
+            } else { alert(data.detail || '提交失败'); }
+        } catch (e) { alert('提交失败，请重试'); }
+    }
+
+    async function loadItems() {
+        const grid = document.getElementById('item-grid');
+        grid.innerHTML = '<div class="empty-state"><div class="icon">&#9203;</div><div class="text">加载中...</div></div>';
+
+        try {
+            let items = [];
+            if (currentTab === 'arxiv') {
+                const res = await fetch(`${API_BASE}/categories`);
+                const data = await res.json();
+                items = data.categories.map(c => ({ id: c.id, code: c.code, name: c.name, description: c.description || '', type: 'arxiv_category' }));
+                document.getElementById('section-label').textContent = 'ArXiv 类目';
+            } else if (currentTab === 'rss') {
+                const res = await fetch(`${API_BASE}/feeds`);
+                const data = await res.json();
+                items = data.feeds.map(f => ({ id: f.id, code: f.id.toString(), name: f.title, description: f.category || '', type: 'rss_feed' }));
+                document.getElementById('section-label').textContent = 'RSS 源';
+            } else if (currentTab === 'wechat') {
+                items = [];
+                document.getElementById('section-label').textContent = '微信公众号';
+            } else if (currentTab === 'weibo') {
+                const res = await fetch(`${API_BASE}/weibo/boards`);
+                const data = await res.json();
+                items = (data.boards || []).map(b => ({ id: b.id, code: b.board_type, name: b.board_name, description: b.description || '', type: 'weibo_hot_search', is_active: b.is_active }));
+                document.getElementById('section-label').textContent = '微博热搜榜单';
+            } else if (currentTab === 'hackernews') {
+                const res = await fetch(`${API_BASE}/hackernews/sources`);
+                const data = await res.json();
+                items = (data.sources || []).map(s => ({ id: s.id, code: s.feed_type, name: s.feed_name, description: s.description || '', type: 'hackernews_source', is_active: s.is_active }));
+                document.getElementById('section-label').textContent = 'HackerNews 板块';
+            } else if (currentTab === 'reddit') {
+                const res = await fetch(`${API_BASE}/reddit/sources`);
+                const data = await res.json();
+                items = (data.sources || []).map(s => ({ id: s.id, code: `${s.source_type}/${s.source_name}`, name: s.display_name || s.source_name, description: s.description || '', type: 'reddit_source', is_active: s.is_active }));
+                document.getElementById('section-label').textContent = 'Reddit 订阅源';
+            } else if (currentTab === 'twitter') {
+                const res = await fetch(`${API_BASE}/twitter/sources`);
+                const data = await res.json();
+                items = (data.sources || []).map(s => ({ id: s.id, code: s.username, name: s.display_name || s.username, description: s.description || '', type: 'twitter_source', is_active: s.is_active }));
+                document.getElementById('section-label').textContent = 'Twitter 用户';
+            } else {
+                items = [];
+                document.getElementById('section-label').textContent = '未知类型';
+            }
+            allItems = items;
+            renderItems(items);
+        } catch (e) {
+            console.error('Failed to load items:', e);
+            grid.innerHTML = '<div class="empty-state"><div class="icon">&#10060;</div><div class="text">加载失败</div></div>';
+        }
+    }
+
+    function renderItems(items) {
+        const grid = document.getElementById('item-grid');
+        document.getElementById('item-count').textContent = `${items.length} 项`;
+
+        if (items.length === 0) {
+            grid.innerHTML = '<div class="empty-state"><div class="icon">&#128236;</div><div class="text">暂无内容</div></div>';
+            return;
+        }
+
+        const typeIcons = { 'arxiv_category': 'AX', 'rss_feed': 'RS', 'wechat_account': '微', 'weibo_hot_search': '微', 'hackernews_source': 'HN', 'reddit_source': 'RD', 'twitter_source': 'TW' };
+
+        grid.innerHTML = items.map(item => {
+            const key = `${item.type}:${item.id}`;
+            const isSubscribed = userSubscriptions.has(key);
+            const iconClass = getIconClass(item);
+            const isActive = item.is_active !== false;
+            const displayName = item.type === 'arxiv_category' && item.code ? `${item.code} - ${item.name}` : item.name;
+            const badgeHtml = isSearchMode && !isActive ? '<span class="item-badge inactive">未抓取</span>' : '';
+            const iconText = item.type === 'arxiv_category' ? (item.code || '').split('.')[0].toUpperCase().slice(0,2) : (typeIcons[item.type] || item.type.slice(0,2).toUpperCase());
+
+            return `
+                <div class="item-card ${isSubscribed ? 'subscribed' : ''} ${!isActive ? 'inactive' : ''}" data-id="${item.id}" data-type="${item.type}">
+                    <div class="item-icon ${iconClass}">${iconText}</div>
+                    <div class="item-info">
+                        <div class="item-name">${escapeHtml(displayName)}${badgeHtml}</div>
+                        <div class="item-desc">${escapeHtml(item.description || '')}</div>
+                    </div>
+                    <div class="item-action">
+                        <button class="btn ${isSubscribed ? 'btn-unsubscribe' : 'btn-subscribe'}" onclick="toggleSubscription('${item.type}', ${item.id})">${isSubscribed ? '取消订阅' : '订阅'}</button>
+                    </div>
+                </div>
+            `;
+        }).join('');
+    }
+
+    function getIconClass(item) {
+        const type = item.type || '';
+        if (type === 'rss_feed' || type === 'rss') return 'rss';
+        if (type === 'wechat_account' || type === 'wechat') return 'wechat';
+        if (type === 'weibo_hot_search' || type === 'weibo') return 'weibo';
+        if (type === 'hackernews_source' || type === 'hackernews') return 'hackernews';
+        if (type === 'reddit_source' || type === 'reddit') return 'reddit';
+        if (type === 'twitter_source' || type === 'twitter') return 'twitter';
+        if (type === 'arxiv_category' || type === 'arxiv') {
+            const code = item.code || '';
+            if (code.startsWith('cs.')) return 'cs';
+            if (code.startsWith('math.')) return 'math';
+            if (code.startsWith('physics') || code.includes('-ph')) return 'phys';
+            if (code.startsWith('stat.')) return 'stat';
+            return 'arxiv';
+        }
+        return 'other';
+    }
+
+    function debouncedSearch() {
+        clearTimeout(searchDebounceTimer);
+        searchDebounceTimer = setTimeout(() => performSearch(), 300);
+    }
+
+    async function performSearch() {
+        const keyword = document.getElementById('search-input').value.trim();
+        const hint = document.getElementById('search-hint');
+
+        if (!keyword) {
+            isSearchMode = false;
+            hint.textContent = '';
+            document.getElementById('section-label').textContent = getSectionLabel(currentTab);
+            loadItems();
+            return;
+        }
+
+        isSearchMode = true;
+        hint.textContent = '搜索中...';
+
+        try {
+            const res = await fetch(`${API_BASE}/sources/search?q=${encodeURIComponent(keyword)}&limit=50`);
+            const data = await res.json();
+            const allResults = [...(data.arxiv || []), ...(data.rss || []), ...(data.wechat || []), ...(data.weibo || []), ...(data.hackernews || []), ...(data.reddit || []), ...(data.twitter || [])];
+            allItems = allResults;
+            document.getElementById('section-label').textContent = `搜索结果: "${keyword}"`;
+            hint.textContent = `找到 ${allResults.length} 项`;
+            renderItems(allResults);
+        } catch (e) { hint.textContent = '搜索失败'; }
+    }
+
+    function getSectionLabel(tab) {
+        const labels = { 'arxiv': 'ArXiv 类目', 'rss': 'RSS 源', 'wechat': '微信公众号', 'weibo': '微博热搜', 'hackernews': 'HackerNews', 'reddit': 'Reddit', 'twitter': 'Twitter' };
+        return labels[tab] || tab;
+    }
+
+    async function toggleSubscription(type, id) {
+        const key = `${type}:${id}`;
+        const token = localStorage.getItem('access_token');
+
+        try {
+            let res;
+            if (userSubscriptions.has(key)) {
+                res = await fetch(`${API_BASE}/subscriptions/${type}/${id}`, { method: 'DELETE', headers: { 'Authorization': `Bearer ${token}` } });
+            } else {
+                res = await fetch(`${API_BASE}/subscriptions?source_type=${encodeURIComponent(type)}&source_id=${id}`, { method: 'POST', headers: { 'Authorization': `Bearer ${token}` } });
+            }
+            if (res.ok) {
+                if (userSubscriptions.has(key)) userSubscriptions.delete(key);
+                else userSubscriptions.add(key);
+                updateStats();
+                renderItems(allItems);
+            } else {
+                const data = await res.json().catch(() => ({}));
+                alert(data.detail || '操作失败，请重试');
+            }
+        } catch (e) { alert('操作失败，请重试'); }
+    }
+
+    checkAuthState();
+</script>
+{% endblock %}

@@ -1,0 +1,270 @@
+# ResearchPulse Default Configuration
+# This file contains non-sensitive defaults.
+# Sensitive values should be set in .env file.
+
+app:
+  name: ResearchPulse
+  debug: false
+  data_dir: ./data
+  url_prefix: /researchpulse
+
+database:
+  pool_size: 10
+  max_overflow: 20
+  pool_recycle: 3600
+  echo: false
+
+cache:
+  enabled: false
+  default_ttl: 300
+
+jwt:
+  algorithm: HS256
+  access_token_expire_minutes: 1440  # 1 day = 24 hours * 60 minutes
+  refresh_token_expire_days: 7
+
+crawler:
+  arxiv:
+    categories: cs.LG,cs.CV,cs.IR,cs.CL,cs.DC
+    max_results: 50
+    delay_base: 3.0
+    delay_jitter: 1.5
+    batch_delay: 10.0
+    # 排序模式列表: submittedDate(新发表论文), lastUpdatedDate(更新论文)
+    sort_modes:
+      - submittedDate
+      - lastUpdatedDate
+    # 是否标记论文类型（new/updated）
+    mark_paper_type: true
+    # RSS 格式: "rss" 或 "atom"
+    rss_format: "rss"
+  rss:
+    timeout: 30
+    max_concurrent: 5
+    user_agent: "ResearchPulse/2.0"
+  wechat:
+    timeout: 30
+    max_concurrent: 3
+  weibo:
+    timeout: 30
+    delay_base: 5.0
+    delay_jitter: 2.0
+    max_retry: 3
+    retry_backoff: 10.0
+    # 登录 Cookie，用于访问需要认证的接口（其他榜单）
+    # 获取方式: 登录微博后，在浏览器开发者工具中复制 Cookie 值
+    # 格式: "SUB=xxx; SUBP=xxx; ..."
+    # 注意: Cookie 为空时，只有热搜榜可以抓取
+    cookie: ""
+    boards:
+      - type: realtimehot
+        name: 热搜榜
+        # 公开接口，无需 Cookie，默认启用
+        enabled: true
+      - type: socialevent
+        name: 要闻榜
+        # 需要 Cookie，默认禁用
+        enabled: false
+      - type: entrank
+        name: 文娱榜
+        # 需要 Cookie，默认禁用
+        enabled: false
+      - type: sport
+        name: 体育榜
+        # 需要 Cookie，默认禁用
+        enabled: false
+      - type: game
+        name: 游戏榜
+        # 需要 Cookie，默认禁用
+        enabled: false
+
+scheduler:
+  crawl_interval_hours: 6
+  cleanup_hour: 3
+  backup_hour: 4
+  timezone: UTC
+
+data_retention:
+  active_days: 7
+  archive_days: 30
+  backup_enabled: true
+
+logging:
+  level: INFO
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+
+email:
+  enabled: false
+  from: ""
+  # Email backends (comma-separated for fallback): smtp, sendgrid, mailgun, brevo
+  # Default: smtp
+  backends: smtp
+  # SMTP settings
+  smtp:
+    host: ""
+    port: 587
+    ports: "587,465,2525"  # Multi-port retry
+    ssl_ports: "465"
+    user: ""
+    password: ""
+    timeout: 10.0
+    retries: 3
+    retry_backoff: 10.0
+    tls: true
+    ssl: false
+  # SendGrid settings
+  sendgrid:
+    api_key: ""
+    retries: 3
+    retry_backoff: 10.0
+  # Mailgun settings
+  mailgun:
+    api_key: ""
+    domain: ""
+    retries: 3
+    retry_backoff: 10.0
+  # Brevo settings
+  brevo:
+    api_key: ""
+    from_name: "ResearchPulse"
+    retries: 3
+    retry_backoff: 10.0
+  # Notification settings
+  notification:
+    frequency: daily  # daily, weekly, instant
+    time: "09:00"
+    max_articles: 20
+
+# AI Processing Configuration
+ai_processor:
+  enabled: false
+  provider: "ollama"  # ollama, openai, claude
+  ollama:
+    base_url: "http://localhost:11434"
+    model: "qwen3:32b"
+    model_light: ""
+    model_screen: ""
+    timeout: 120
+    keep_alive: 300
+    api_key: ""  # Optional API key for authenticated Ollama deployments
+    thinking_enabled: false
+    concurrent_enabled: false
+    workers_heavy: 2
+    workers_screen: 4
+  openai:
+    base_url: "https://api.openai.com/v1"  # Custom base URL for proxies or compatible APIs
+    model: "gpt-4o"
+    model_light: "gpt-4o-mini"
+    timeout: 60
+  claude:
+    model: "claude-sonnet-4-20250514"
+    model_light: "claude-haiku-4-20250514"
+    timeout: 60
+  rule_optimization:
+    skip_enabled: true
+    skip_low_importance_enabled: true
+    skip_low_importance_threshold: 3
+    skip_short_content_threshold: 150
+    rule_only_enabled: true
+    rule_only_max_content_length: 1000
+    rule_only_min_keyword_boost: 1
+    minimal_prompt_enabled: true
+    minimal_prompt_threshold: 4
+    minimal_prompt_min_confidence: 0.5
+    paper_prompt_enabled: true
+    paper_extended_content_length: 2500
+    paper_upgrade_importance_threshold: 10
+    paper_upgrade_novelty_boost: 0
+  cache:
+    enabled: true
+    ttl: 86400
+  max_content_length: 1500
+  max_title_length: 200
+  # Provider 公用参数
+  no_think: false            # 禁用模型内部思考（qwen3, o1/o3 等）
+  num_predict: 512           # 高价值内容最大生成 token 数
+  num_predict_simple: 256    # 低价值内容最大生成 token 数
+  max_retries: 3
+  retry_base_delay: 1.0
+  batch_concurrency: 1
+  fallback_provider: ""
+  translate_max_tokens: 4096
+
+# Embedding Configuration (with Milvus)
+embedding:
+  enabled: false
+  provider: "sentence-transformers"  # sentence-transformers, openai
+  model: "all-MiniLM-L6-v2"
+  dimension: 384
+  similarity_threshold: 0.85
+  milvus:
+    host: "localhost"
+    port: 19530
+    user: ""
+    password: ""
+    collection_name: "article_embeddings"
+    index_type: "HNSW"
+    metric_type: "COSINE"
+    index_params:
+      M: 16
+      efConstruction: 256
+    search_params:
+      ef: 64
+    batch_size: 1000
+    timeout: 30
+
+# Event Clustering Configuration
+event:
+  enabled: false
+  clustering:
+    rule_weight: 0.4
+    semantic_weight: 0.6
+    min_similarity: 0.7
+    time_window_days: 3
+    min_importance_for_new_cluster: 6
+  cache_ttl: 3600
+
+# Topic Configuration
+topic:
+  enabled: false
+  discovery:
+    min_frequency: 5
+    lookback_days: 14
+    min_confidence: 0.5
+  radar:
+    snapshot_interval: "daily"
+    min_relevance: 0.3
+
+# Action Items Configuration
+action:
+  enabled: false
+
+# Report Generation Configuration
+report:
+  enabled: false
+
+# Daily Report Configuration
+# 分类中文名称从数据库 arxiv_categories 表读取（name_zh 字段）
+daily_report:
+  enabled: true
+  hour: 8
+  minute: 0
+  categories: "cs.LG,cs.CV,cs.CL,cs.AI,cs.RO,cs.NE"
+  max_articles: 50
+  translate_title: true
+  offset_days: 1
+
+# Notification Configuration
+notification:
+  wechat:
+    enabled: false
+    appid: ""
+    appsecret: ""
+
+# Video Generation Configuration (optional)
+video:
+  enabled: false
+  tts:
+    provider: "edge-tts"
+    voice: "yunxi"
+  output_dir: "./videos"

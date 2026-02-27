@@ -1,0 +1,1012 @@
+{% extends "base.html" %}
+
+{% block title %}ResearchPulse - 学术资讯聚合{% endblock %}
+
+{% block extra_styles %}
+{% include "components/index_styles.html" %}
+{% endblock %}
+
+{% block content %}
+<div class="main-container">
+    <!-- Sidebar -->
+    <div class="sidebar">
+    <div class="sidebar-section">
+        <div class="sidebar-title">来源筛选</div>
+        <div class="source-groups" id="source-groups">
+            <!-- "全部来源" 独立显示在顶部 -->
+            <div class="source-item source-all" data-source="" onclick="selectSource('')">
+                <div class="source-icon" style="background: #1a1a2e;">ALL</div>
+                <span class="source-name">全部来源</span>
+                <span class="source-count" id="count-all">0</span>
+            </div>
+            <!-- 分组由 JavaScript 动态生成 -->
+        </div>
+    </div>
+
+    <div class="sidebar-section">
+        <div class="sidebar-title">分类筛选</div>
+        <div class="filter-group">
+            <select class="filter-select" id="category-select" onchange="applyFilters()">
+                <option value="">全部分类</option>
+            </select>
+        </div>
+    </div>
+
+    <div class="sidebar-section">
+        <div class="sidebar-title">关键词搜索</div>
+        <div class="filter-group">
+            <input type="text" class="filter-input" id="keyword-input" placeholder="搜索标题、摘要..." onkeypress="if(event.key==='Enter')applyFilters()">
+        </div>
+    </div>
+
+    <div class="sidebar-section">
+        <div class="sidebar-title">时间范围</div>
+        <div class="filter-group">
+            <select class="filter-select" id="time-range" onchange="applyFilters()">
+                <option value="">全部时间</option>
+                <option value="1">最近1天</option>
+                <option value="3">最近3天</option>
+                <option value="7">最近7天</option>
+            </select>
+        </div>
+    </div>
+
+    <!-- 导出功能仅对登录用户显示 -->
+    <div class="sidebar-section" id="export-section" style="display: none;">
+        <div class="sidebar-title">导出</div>
+        <div class="filter-group">
+            <button class="export-btn" onclick="exportMarkdown()">
+                📥 导出 Markdown
+            </button>
+        </div>
+    </div>
+</div>
+
+<!-- Content -->
+<div class="content">
+    <div class="stats-bar">
+        <div class="stats-left">
+            <div class="stat-item">
+                <span class="stat-value" id="total-count">0</span>
+                <span class="stat-label">篇文章</span>
+            </div>
+        </div>
+        <select class="sort-select" id="sort-select" onchange="applyFilters()">
+            <option value="publish_time">按发布时间</option>
+            <option value="crawl_time">按抓取时间</option>
+        </select>
+    </div>
+
+    <div class="article-list" id="article-list">
+        <div class="empty-state">
+            <div class="icon">📚</div>
+            <div class="text">加载中...</div>
+        </div>
+    </div>
+
+    <div class="pagination" id="pagination"></div>
+</div>
+</div>
+
+<!-- Auth Modals -->
+{% include "components/auth_modals.html" %}
+{% endblock %}
+
+{% block scripts %}
+<script>
+// ========== 状态变量 ==========
+let currentPage = 1;
+let pageSize = 20;
+let totalArticles = 0;
+let currentUser = null;
+let currentSource = 'rss';
+let userStars = new Set();
+let categoryNames = {};  // 分类代码到名称的映射
+let featureStatus = {};  // 功能开关状态缓存
+
+// ========== 来源分组配置 ==========
+const sourceGroups = [
+    {
+        id: 'academic',
+        name: '学术来源',
+        sources: ['arxiv'],
+        defaultExpanded: true
+    },
+    {
+        id: 'content',
+        name: '内容平台',
+        sources: ['rss', 'wechat', 'weibo'],
+        defaultExpanded: true
+    },
+    {
+        id: 'social',
+        name: '社交媒体',
+        sources: ['hackernews', 'reddit', 'twitter'],
+        defaultExpanded: false
+    },
+    {
+        id: 'ai',
+        name: 'AI 生成',
+        sources: ['aigc'],
+        defaultExpanded: false
+    }
+];
+
+// 来源元信息配置
+const sourceMeta = {
+    'arxiv': { name: 'ArXiv', icon: 'AX', color: '#b31b1b' },
+    'rss': { name: 'RSS', icon: 'RSS', color: '#f39c12' },
+    'wechat': { name: '微信', icon: '微', color: '#07c160' },
+    'weibo': { name: '微博', icon: '微', color: '#e6162d' },
+    'hackernews': { name: 'HN', icon: 'HN', color: '#ff6600' },
+    'reddit': { name: 'Reddit', icon: 'RD', color: '#ff4500' },
+    'twitter': { name: 'Twitter', icon: 'TW', color: '#1da1f2' },
+    'aigc': { name: 'AIGC', icon: 'AI', color: '#667eea' }
+};
+
+// 分组状态存储
+let groupExpandState = {};
+
+// ========== 初始化来源分组 UI ==========
+function initSourceGroups() {
+    const container = document.getElementById('source-groups');
+    if (!container) return;
+
+    // 从 localStorage 恢复展开状态
+    const savedState = localStorage.getItem('sourceGroupExpandState');
+    if (savedState) {
+        try {
+            groupExpandState = JSON.parse(savedState);
+        } catch (e) {
+            groupExpandState = {};
+        }
+    }
+
+    // 渲染分组
+    sourceGroups.forEach(group => {
+        const isExpanded = groupExpandState.hasOwnProperty(group.id)
+            ? groupExpandState[group.id]
+            : group.defaultExpanded;
+
+        // 创建分组标题
+        const header = document.createElement('div');
+        header.className = 'source-group-header' + (isExpanded ? ' expanded' : '');
+        header.id = `group-header-${group.id}`;
+        header.onclick = () => toggleGroup(group.id);
+        header.innerHTML = `
+            <span class="arrow">▶</span>
+            <span class="group-name">${group.name}</span>
+            <span class="group-count" id="group-count-${group.id}">0</span>
+        `;
+
+        // 创建分组内容容器
+        const items = document.createElement('div');
+        items.className = 'source-group-items' + (isExpanded ? ' expanded' : '');
+        items.id = `group-items-${group.id}`;
+
+        // 渲染分组内的来源项
+        group.sources.forEach(source => {
+            const meta = sourceMeta[source];
+            if (!meta) return;
+
+            const item = document.createElement('div');
+            item.className = 'source-item' + (currentSource === source ? ' active' : '');
+            item.dataset.source = source;
+            item.onclick = () => selectSource(source);
+            item.innerHTML = `
+                <div class="source-icon" style="background: ${meta.color};">${meta.icon}</div>
+                <span class="source-name">${meta.name}</span>
+                <span class="source-count" id="count-${source}">0</span>
+            `;
+            items.appendChild(item);
+        });
+
+        container.appendChild(header);
+        container.appendChild(items);
+    });
+
+    // 设置初始选中状态
+    updateActiveSourceItem();
+}
+
+// 切换分组展开/折叠
+function toggleGroup(groupId) {
+    const header = document.getElementById(`group-header-${groupId}`);
+    const items = document.getElementById(`group-items-${groupId}`);
+    if (!header || !items) return;
+
+    const isExpanded = header.classList.toggle('expanded');
+    items.classList.toggle('expanded', isExpanded);
+
+    // 保存状态
+    groupExpandState[groupId] = isExpanded;
+    localStorage.setItem('sourceGroupExpandState', JSON.stringify(groupExpandState));
+}
+
+// 更新选中状态
+function updateActiveSourceItem() {
+    document.querySelectorAll('.source-item').forEach(item => {
+        item.classList.toggle('active', item.dataset.source === currentSource);
+    });
+}
+
+// ========== Mobile Menu Functions ==========
+function toggleMobileMenu() {
+    const sidebar = document.querySelector('.sidebar');
+    const overlay = document.getElementById('mobile-overlay');
+    const mobileNav = document.getElementById('mobile-nav');
+    const btn = document.getElementById('mobile-menu-btn');
+
+    const isOpen = sidebar.classList.contains('open');
+    if (isOpen) {
+        closeMobileMenu();
+    } else {
+        sidebar.classList.add('open');
+        overlay.classList.add('show');
+        mobileNav.classList.add('show');
+        btn.classList.add('active');
+        document.body.style.overflow = 'hidden';
+    }
+}
+
+function closeMobileMenu() {
+    const sidebar = document.querySelector('.sidebar');
+    const overlay = document.getElementById('mobile-overlay');
+    const mobileNav = document.getElementById('mobile-nav');
+    const btn = document.getElementById('mobile-menu-btn');
+
+    sidebar.classList.remove('open');
+    overlay.classList.remove('show');
+    mobileNav.classList.remove('show');
+    btn.classList.remove('active');
+    document.body.style.overflow = '';
+}
+
+function updateMobileNav(user) {
+    const mobileNav = document.getElementById('mobile-nav');
+    let html = `<a href="${APP_BASE}/">首页</a>`;
+    if (user) {
+        html += `<a href="${APP_BASE}/subscriptions">订阅管理</a>`;
+        if (user.is_superuser || featureStatus.event_clustering) {
+            html += `<a href="${APP_BASE}/events">事件聚类</a>`;
+        }
+        if (user.is_superuser || featureStatus.topic_radar) {
+            html += `<a href="${APP_BASE}/topics">话题趋势</a>`;
+        }
+        if (user.is_superuser || featureStatus.action_items) {
+            html += `<a href="${APP_BASE}/actions">行动建议</a>`;
+        }
+        if (user.is_superuser || featureStatus.report_generation) {
+            html += `<a href="${APP_BASE}/reports">报告中心</a>`;
+        }
+        html += `<a href="${APP_BASE}/daily-reports">每日报告</a>`;
+        if (user.is_superuser) {
+            html += `<a href="${APP_BASE}/admin">管理后台</a>`;
+        }
+        html += `<a href="#" onclick="logout(); return false;">退出登录</a>`;
+    } else {
+        html += `<a href="#" onclick="showModal('login'); closeMobileMenu(); return false;">登录</a>`;
+        html += `<a href="#" onclick="showModal('register'); closeMobileMenu(); return false;">注册</a>`;
+    }
+    mobileNav.innerHTML = html;
+}
+
+// ========== 功能开关加载 ==========
+async function loadFeatureStatus() {
+    try {
+        const res = await fetch(`${API_BASE}/feature-status`);
+        if (res.ok) {
+            featureStatus = await res.json();
+        }
+    } catch (e) {
+        featureStatus = {};
+    }
+}
+
+// ========== 初始化 ==========
+document.addEventListener('DOMContentLoaded', () => {
+    initSourceGroups();
+    checkAuthState();
+    loadCategoryNames();
+    loadCategories('rss');
+    loadStats();
+});
+
+// ========== 认证状态检查 ==========
+async function checkAuthState() {
+    await loadFeatureStatus();
+    const token = localStorage.getItem('access_token');
+    if (token) {
+        try {
+            const res = await fetch(`${AUTH_BASE}/auth/me`, {
+                headers: { 'Authorization': `Bearer ${token}` }
+            });
+            if (res.ok) {
+                currentUser = await res.json();
+                updateAuthUI();
+                loadUserStars();
+                loadArticles();
+                return;
+            } else {
+                localStorage.removeItem('access_token');
+            }
+        } catch (e) {
+            localStorage.removeItem('access_token');
+        }
+    }
+    currentUser = null;
+    updateAuthUI();
+    showLoginPrompt();
+}
+
+function updateAuthUI() {
+    const area = document.getElementById('auth-area');
+    const navMenu = document.getElementById('nav-menu');
+    const exportSection = document.getElementById('export-section');
+
+    if (currentUser) {
+        area.innerHTML = `
+            <span class="user-info">👤 ${currentUser.username}</span>
+            <a href="#" onclick="logout()">退出</a>
+        `;
+        exportSection.style.display = 'block';
+
+        let navHtml = `<a href="${APP_BASE}/">首页</a>`;
+        navHtml += '<a href="#" onclick="goTo(\'subscriptions\')">订阅管理</a>';
+        if (currentUser.is_superuser || featureStatus.event_clustering) {
+            navHtml += `<a href="${APP_BASE}/events">事件聚类</a>`;
+        }
+        if (currentUser.is_superuser || featureStatus.topic_radar) {
+            navHtml += `<a href="${APP_BASE}/topics">话题趋势</a>`;
+        }
+        if (currentUser.is_superuser || featureStatus.action_items) {
+            navHtml += `<a href="${APP_BASE}/actions">行动建议</a>`;
+        }
+        if (currentUser.is_superuser || featureStatus.report_generation) {
+            navHtml += `<a href="${APP_BASE}/reports">报告中心</a>`;
+        }
+        navHtml += `<a href="${APP_BASE}/daily-reports">每日报告</a>`;
+        if (currentUser.is_superuser) {
+            navHtml += '<a href="#" onclick="goTo(\'admin\')">管理后台</a>';
+        }
+        navMenu.innerHTML = navHtml;
+        updateMobileNav(currentUser);
+    } else {
+        area.innerHTML = `
+            <a href="#" onclick="showModal('login')">登录</a>
+            <a href="#" onclick="showModal('register')">注册</a>
+        `;
+        exportSection.style.display = 'none';
+        navMenu.innerHTML = `<a href="${APP_BASE}/">首页</a>`;
+        updateMobileNav(null);
+    }
+}
+
+async function loadUserStars() {
+    // TODO: Load user's starred articles
+}
+
+function goTo(page) {
+    if (!currentUser) {
+        showModal('login');
+        return;
+    }
+    if (page === 'admin' && !currentUser.is_superuser) {
+        alert('您没有权限访问管理后台');
+        return;
+    }
+    if (page === 'subscriptions') {
+        location.href = APP_BASE + '/subscriptions';
+    } else if (page === 'admin') {
+        location.href = APP_BASE + '/admin';
+    }
+}
+
+// ========== 筛选函数 ==========
+function selectSource(source) {
+    currentSource = source;
+    updateActiveSourceItem();
+    currentPage = 1;
+    document.getElementById('category-select').innerHTML = '<option value="">全部分类</option>';
+    loadCategories(source);
+    loadArticles();
+}
+
+function applyFilters() {
+    currentPage = 1;
+    loadArticles();
+}
+
+// ========== 数据加载 ==========
+async function loadCategoryNames() {
+    try {
+        const res = await fetch(`${API_BASE}/categories?source_type=arxiv`);
+        const data = await res.json();
+        if (data.categories) {
+            data.categories.forEach(cat => {
+                categoryNames[cat.code] = cat.name || cat.code;
+            });
+        }
+    } catch (e) {
+        console.error('Failed to load category names:', e);
+    }
+}
+
+async function loadCategories(sourceType = '') {
+    try {
+        const params = new URLSearchParams();
+        if (sourceType) params.append('source_type', sourceType);
+        const res = await fetch(`${API_BASE}/categories?${params}`);
+        const data = await res.json();
+        const select = document.getElementById('category-select');
+        select.innerHTML = '<option value="">全部分类</option>';
+        data.categories.forEach(cat => {
+            const opt = document.createElement('option');
+            opt.value = cat.code;
+            opt.textContent = cat.name ? `${cat.code} - ${cat.name}` : cat.code;
+            select.appendChild(opt);
+        });
+    } catch (e) {
+        console.error('Failed to load categories:', e);
+    }
+}
+
+async function loadStats() {
+    try {
+        const sources = ['', 'arxiv', 'rss', 'wechat', 'weibo', 'hackernews', 'reddit', 'twitter', 'aigc'];
+        const counts = {};
+
+        for (const src of sources) {
+            const params = new URLSearchParams({ page_size: 1 });
+            if (src) params.append('source_type', src);
+            const res = await fetch(`${API_BASE}/articles?${params}`);
+            const data = await res.json();
+            counts[src || 'all'] = data.total;
+
+            const el = document.getElementById(src ? `count-${src}` : 'count-all');
+            if (el) el.textContent = data.total;
+        }
+
+        sourceGroups.forEach(group => {
+            let groupTotal = 0;
+            group.sources.forEach(src => {
+                groupTotal += counts[src] || 0;
+            });
+            const groupEl = document.getElementById(`group-count-${group.id}`);
+            if (groupEl) groupEl.textContent = groupTotal;
+        });
+
+        document.getElementById('total-count').textContent = counts['all'] || 0;
+    } catch (e) {
+        console.error('Failed to load stats:', e);
+    }
+}
+
+async function exportMarkdown() {
+    const category = document.getElementById('category-select').value;
+    const timeRange = document.getElementById('time-range').value;
+
+    const params = new URLSearchParams({ page_size: 100 });
+    if (currentSource) params.append('source_type', currentSource);
+    if (category) params.append('category', category);
+
+    if (timeRange) {
+        const date = new Date();
+        date.setDate(date.getDate() - parseInt(timeRange));
+        params.append('from_date', date.toISOString().split('T')[0]);
+    }
+
+    const url = `${API_BASE}/export/markdown?${params}`;
+    const headers = {};
+    const token = localStorage.getItem('access_token');
+    if (token) headers['Authorization'] = `Bearer ${token}`;
+
+    try {
+        const resp = await fetch(url, { headers });
+        if (!resp.ok) {
+            const err = await resp.json().catch(() => ({}));
+            alert(err.detail || '导出失败');
+            return;
+        }
+        const blob = await resp.blob();
+        const disposition = resp.headers.get('Content-Disposition') || '';
+        const match = disposition.match(/filename="?([^"]+)"?/);
+        const filename = match ? match[1] : 'export.md';
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(a.href);
+    } catch (e) {
+        console.error('Export failed:', e);
+        alert('导出失败，请检查网络连接');
+    }
+}
+
+async function loadArticles() {
+    const category = document.getElementById('category-select').value;
+    const keyword = document.getElementById('keyword-input').value;
+    const timeRange = document.getElementById('time-range').value;
+    const sort = document.getElementById('sort-select').value;
+
+    const params = new URLSearchParams({ page: currentPage, page_size: pageSize });
+    if (currentSource) params.append('source_type', currentSource);
+    if (category) params.append('category', category);
+    if (keyword) params.append('keyword', keyword);
+    if (sort) params.append('sort', sort);
+
+    if (timeRange) {
+        const date = new Date();
+        date.setDate(date.getDate() - parseInt(timeRange));
+        params.append('from_date', date.toISOString().split('T')[0]);
+    }
+
+    try {
+        const response = await fetch(`${API_BASE}/articles?${params}`);
+        const data = await response.json();
+
+        totalArticles = data.total;
+        document.getElementById('total-count').textContent = data.total;
+        renderArticles(data.articles);
+        renderPagination();
+    } catch (error) {
+        console.error('Failed to load articles:', error);
+        document.getElementById('article-list').innerHTML = `
+            <div class="empty-state">
+                <div class="icon">❌</div>
+                <div class="text">加载失败，请刷新重试</div>
+            </div>
+        `;
+    }
+}
+
+function renderArticles(articles) {
+    const container = document.getElementById('article-list');
+
+    if (articles.length === 0) {
+        container.innerHTML = `
+            <div class="empty-state">
+                <div class="icon">📭</div>
+                <div class="text">暂无符合条件的文章</div>
+            </div>
+        `;
+        return;
+    }
+
+    container.innerHTML = articles.map(article => renderArticle(article)).join('');
+    loadBatchPipelineStatus(articles.map(a => a.id));
+}
+
+function showLoginPrompt() {
+    const container = document.getElementById('article-list');
+    container.innerHTML = `
+        <div class="empty-state" style="padding: 80px 20px;">
+            <div class="icon" style="font-size: 64px;">🔐</div>
+            <div class="text" style="font-size: 18px; margin-top: 16px;">请先登录查看文章内容</div>
+            <div style="margin-top: 24px;">
+                <button onclick="showModal('login')" style="padding: 12px 32px; background: #4ecdc4; color: white; border: none; border-radius: 8px; font-size: 15px; cursor: pointer;">登录</button>
+                <button onclick="showModal('register')" style="padding: 12px 32px; background: #1a1a2e; color: white; border: none; border-radius: 8px; font-size: 15px; cursor: pointer; margin-left: 12px;">注册账号</button>
+            </div>
+        </div>
+    `;
+    document.getElementById('pagination').innerHTML = '';
+    document.getElementById('total-count').textContent = '-';
+}
+
+function renderArticle(article) {
+    let sourceBadge = '';
+    const sourceType = article.source_type;
+
+    const sourceTypeNames = {
+        'arxiv': 'ArXiv',
+        'rss': 'RSS',
+        'wechat': '微信',
+        'weibo': '微博热搜',
+        'hackernews': 'HackerNews',
+        'reddit': 'Reddit',
+        'twitter': 'Twitter',
+        'aigc': 'AIGC'
+    };
+
+    if (sourceType === 'aigc') {
+        sourceBadge = '';
+    } else if (sourceType === 'rss' && article.source_name) {
+        sourceBadge = `<span class="source-badge ${sourceType}" title="${escapeHtml(article.source_name)}">${escapeHtml(article.source_name)}</span>`;
+    } else if (sourceType === 'wechat' && article.wechat_account_name) {
+        sourceBadge = `<span class="source-badge ${sourceType}" title="${escapeHtml(article.wechat_account_name)}">${escapeHtml(article.wechat_account_name)}</span>`;
+    } else {
+        const displayName = sourceTypeNames[sourceType] || sourceType;
+        sourceBadge = `<span class="source-badge ${sourceType}">${displayName}</span>`;
+    }
+
+    let aigcBadge = '';
+    if (sourceType === 'aigc') {
+        aigcBadge = `<span class="source-badge aigc" title="AI 生成内容">AIGC</span>`;
+    }
+
+    let scoreIndicator = '';
+    if (article.importance_score) {
+        const score = article.importance_score;
+        const level = score >= 8 ? 'high' : score >= 5 ? 'medium' : 'low';
+        const levelNames = { 'high': '高', 'medium': '中', 'low': '低' };
+        scoreIndicator = `<span class="importance-score ${level}" title="AI 重要性评分">${score}/10 ${levelNames[level]}</span>`;
+    }
+
+    const rawContent = article.content || article.summary || '';
+    let displayHtml;
+    let cleanSummary;
+    if (sourceType === 'aigc') {
+        displayHtml = renderMarkdown(rawContent);
+    } else {
+        cleanSummary = stripHtml(rawContent);
+        displayHtml = escapeHtml(cleanSummary);
+    }
+    const hasLongSummary = sourceType !== 'aigc' && (cleanSummary || '').length > 300;
+
+    // 翻译内容处理
+    const hasTranslation = article.content_summary && article.content_summary.trim();
+    const cleanTranslation = hasTranslation ? stripHtml(article.content_summary) : '';
+    const translationHtml = cleanTranslation ? escapeHtml(cleanTranslation) : '';
+
+    const publishTime = article.publish_time ? formatDate(article.publish_time) : '';
+    const updatedTime = article.arxiv_updated_time ? formatDate(article.arxiv_updated_time) : '';
+    const crawlTime = article.crawl_time ? formatDate(article.crawl_time) : '';
+
+    let timeDisplay = '';
+    if (article.source_type === 'arxiv') {
+        timeDisplay = `<span>📅 发布: ${publishTime || '未知'}</span>`;
+        if (updatedTime && updatedTime !== publishTime) {
+            timeDisplay += `<span>🔄 更新: ${updatedTime}</span>`;
+        }
+    } else {
+        timeDisplay = `<span>📅 ${publishTime || crawlTime || '未知'}</span>`;
+    }
+
+    let tagsArray = [];
+    const rawTags = article.tags;
+    if (Array.isArray(rawTags)) {
+        tagsArray = rawTags;
+    } else if (rawTags && typeof rawTags === 'object') {
+        Object.entries(rawTags).forEach(([k, v]) => {
+            if (v !== '' && v !== 0 && v !== null && v !== undefined) {
+                tagsArray.push(`${k}: ${v}`);
+            }
+        });
+    }
+    const tags = tagsArray.slice(0, 5).map(t => `<span class="tag">${escapeHtml(String(t))}</span>`).join('');
+
+    let arxivDetails = '';
+    let arxivActions = '';
+    if (article.source_type === 'arxiv') {
+        const pdfUrl = `https://arxiv.org/pdf/${article.arxiv_id}`;
+        const translateUrl = `https://hjfy.top/arxiv/${article.arxiv_id}`;
+        const googleTranslateUrl = `https://arxiv-org.translate.goog/abs/${article.arxiv_id}?_x_tr_sl=en&_x_tr_tl=zh-CN&_x_tr_hl=zh-CN`;
+
+        arxivDetails = `
+            <div class="arxiv-details">
+                <div class="row">
+                    <span><span class="label">arXiv ID:</span> <span class="value">${escapeHtml(article.arxiv_id || '')}</span></span>
+                    ${article.arxiv_primary_category ? `<span><span class="label">主类目:</span> <span class="value">${escapeHtml(article.arxiv_primary_category)}${categoryNames[article.arxiv_primary_category] ? ' - ' + escapeHtml(categoryNames[article.arxiv_primary_category]) : ''}</span></span>` : ''}
+                </div>
+            </div>
+        `;
+
+        arxivActions = `
+            <a href="${pdfUrl}" target="_blank" class="action-btn">📄 PDF</a>
+            <a href="${translateUrl}" target="_blank" class="action-btn">🌐 中英对照</a>
+            <a href="${googleTranslateUrl}" target="_blank" class="action-btn">🔍 谷歌翻译</a>
+        `;
+    }
+
+    const expandBtn = hasLongSummary ? `<div class="expand-btn" onclick="toggleExpand(this)">展开全文</div>` : '';
+    const contentClass = hasLongSummary ? 'article-content collapsed' : 'article-content';
+    const isStarred = userStars.has(article.id);
+    const aiInsight = renderAiInsight(article);
+    const translationSection = renderTranslationSection(article, translationHtml, cleanTranslation);
+
+    return `
+        <div class="article-card">
+            <div class="article-header">
+                <div class="article-title">
+                    <a href="${escapeHtml(article.url)}" target="_blank">${escapeHtml(article.title)}</a>
+                </div>
+                <div class="article-source">${aigcBadge}${sourceBadge}</div>
+            </div>
+            <div class="article-meta">
+                <span>👤 ${escapeHtml(article.author || '未知作者')}</span>
+                ${timeDisplay}
+                ${article.category ? `<span>📁 ${escapeHtml(article.category)}${categoryNames[article.category] ? ' - ' + escapeHtml(categoryNames[article.category]) : ''}</span>` : ''}
+                ${article.ai_category ? `<span>🤖 ${escapeHtml(article.ai_category)}</span>` : ''}
+                ${scoreIndicator}
+            </div>
+            ${sourceType === 'aigc'
+                ? `<div class="article-content aigc-content">${displayHtml}</div>`
+                : `<div class="original-content-section">
+                        <div class="original-content-header">
+                            <span class="original-tag">原文</span>
+                            <span class="original-label">Abstract</span>
+                        </div>
+                        <div class="${contentClass}" data-full="${escapeHtml(cleanSummary)}">${displayHtml}</div>
+                        ${expandBtn}
+                   </div>`
+            }
+            ${translationSection}
+            ${arxivDetails}
+            ${aiInsight}
+            <div class="article-footer">
+                <div class="article-tags">${tags}</div>
+                <div class="article-actions">
+                    <button class="action-btn ${isStarred ? 'starred' : ''}" onclick="toggleStar(${article.id})">
+                        ${isStarred ? '⭐ 已收藏' : '☆ 收藏'}
+                    </button>
+                    ${arxivActions}
+                </div>
+            </div>
+            <div class="pipeline-indicator" id="pipeline-${article.id}"></div>
+        </div>
+    `;
+}
+
+// ========== AI 分析面板渲染 ==========
+function renderAiInsight(article) {
+    if (!article.ai_processed_at) return '';
+
+    const hasContent = article.one_liner || article.ai_summary || article.key_points || article.impact_assessment || article.actionable_items;
+    if (!hasContent) return '';
+
+    const cardId = `ai-insight-${article.id}`;
+
+    return `
+        <div class="ai-insight" id="${cardId}">
+            <div class="ai-insight-header" onclick="toggleAiInsight('${cardId}')">
+                <span class="toggle-arrow" id="${cardId}-arrow">&#9654;</span>
+                <span class="aigc-tag">AIGC</span>
+                <span>AI 智能分析</span>
+                ${article.one_liner ? `<span style="color:#888;font-weight:normal;font-size:12px;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">&mdash; ${escapeHtml(article.one_liner)}</span>` : ''}
+            </div>
+            <div class="ai-insight-body" id="${cardId}-body" style="display:none;">
+                ${article.one_liner ? `<div class="one-liner">${escapeHtml(article.one_liner)}</div>` : ''}
+                ${article.ai_summary ? `<div class="ai-summary-text">${escapeHtml(article.ai_summary)}</div>` : ''}
+                ${renderKeyPoints(article.key_points)}
+                ${renderImpactAssessment(article.impact_assessment)}
+                ${renderActionableItems(article.actionable_items)}
+                <div class="ai-meta">
+                    ${article.ai_provider ? `<span>提供商: ${escapeHtml(article.ai_provider)}</span>` : ''}
+                    ${article.ai_model ? `<span>模型: ${escapeHtml(article.ai_model)}</span>` : ''}
+                    ${article.processing_method ? `<span>方式: ${escapeHtml(article.processing_method)}</span>` : ''}
+                    ${article.ai_processed_at ? `<span>处理时间: ${formatDate(article.ai_processed_at)}</span>` : ''}
+                </div>
+            </div>
+        </div>
+    `;
+}
+
+function toggleAiInsight(cardId) {
+    const body = document.getElementById(cardId + '-body');
+    const arrow = document.getElementById(cardId + '-arrow');
+    if (body.style.display === 'none') {
+        body.style.display = 'block';
+        arrow.classList.add('open');
+    } else {
+        body.style.display = 'none';
+        arrow.classList.remove('open');
+    }
+}
+
+// ========== 翻译内容渲染 ==========
+function renderTranslationSection(article, translationHtml, cleanTranslation) {
+    if (!cleanTranslation) return '';
+
+    const cardId = `translation-${article.id}`;
+    const previewText = cleanTranslation.length > 80 ? cleanTranslation.substring(0, 80) + '...' : cleanTranslation;
+
+    return `
+        <div class="translation-section" id="${cardId}">
+            <div class="translation-header" onclick="toggleTranslation('${cardId}')">
+                <span class="toggle-arrow" id="${cardId}-arrow">&#9654;</span>
+                <span class="translation-tag">翻译</span>
+                <span>中文摘要</span>
+                <span style="color:#888;font-weight:normal;font-size:12px;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">&mdash; ${escapeHtml(previewText)}</span>
+            </div>
+            <div class="translation-body" id="${cardId}-body" style="display:none;">
+                <div class="translation-content">${translationHtml}</div>
+            </div>
+        </div>
+    `;
+}
+
+function toggleTranslation(cardId) {
+    const body = document.getElementById(cardId + '-body');
+    const arrow = document.getElementById(cardId + '-arrow');
+    if (body.style.display === 'none') {
+        body.style.display = 'block';
+        arrow.classList.add('open');
+    } else {
+        body.style.display = 'none';
+        arrow.classList.remove('open');
+    }
+}
+
+function renderKeyPoints(keyPoints) {
+    if (!keyPoints || !Array.isArray(keyPoints) || keyPoints.length === 0) return '';
+    const items = keyPoints.map(kp => {
+        const type = kp.type ? `<span class="kp-type">${escapeHtml(String(kp.type))}</span>` : '';
+        const value = kp.value ? `<span class="kp-value">${escapeHtml(String(kp.value))}${kp.impact ? `<div class="kp-impact">${escapeHtml(String(kp.impact))}</div>` : ''}</span>` : '';
+        return `<li>${type}${value}</li>`;
+    }).join('');
+    return `<div class="section-title">关键要点</div><ul class="key-points-list">${items}</ul>`;
+}
+
+function renderImpactAssessment(impact) {
+    if (!impact || typeof impact !== 'object') return '';
+    const shortTerm = impact.short_term || impact.shortTerm || '';
+    const longTerm = impact.long_term || impact.longTerm || '';
+    const certainty = impact.certainty || '';
+    if (!shortTerm && !longTerm) return '';
+    return `
+        <div class="section-title">影响力评估${certainty ? ` (确定性: ${escapeHtml(String(certainty))})` : ''}</div>
+        <div class="impact-grid">
+            ${shortTerm ? `<div class="impact-item"><div class="impact-label">短期影响</div><div class="impact-text">${escapeHtml(String(shortTerm))}</div></div>` : ''}
+            ${longTerm ? `<div class="impact-item"><div class="impact-label">长期影响</div><div class="impact-text">${escapeHtml(String(longTerm))}</div></div>` : ''}
+        </div>
+    `;
+}
+
+function renderActionableItems(items) {
+    if (!items || !Array.isArray(items) || items.length === 0) return '';
+    const priorityMap = { '高': 'high', '中': 'medium', '低': 'low', 'high': 'high', 'medium': 'medium', 'low': 'low' };
+    const rendered = items.map(item => {
+        const priority = item.priority || '';
+        const pClass = priorityMap[priority] || 'medium';
+        const type = item.type ? `[${escapeHtml(String(item.type))}] ` : '';
+        const desc = item.description ? escapeHtml(String(item.description)) : '';
+        return `<li><span class="act-priority ${pClass}">${escapeHtml(String(priority || '中'))}</span><span>${type}${desc}</span></li>`;
+    }).join('');
+    return `<div class="section-title">可执行建议</div><ul class="actionable-list">${rendered}</ul>`;
+}
+
+// ========== Pipeline 状态指示器 ==========
+async function loadBatchPipelineStatus(articleIds) {
+    if (!articleIds || articleIds.length === 0) return;
+    try {
+        const res = await fetch(`${API_BASE}/articles/batch-pipeline-status?article_ids=${articleIds.join(',')}`);
+        if (!res.ok) return;
+        const data = await res.json();
+        const statuses = data.statuses || {};
+        for (const [aid, stages] of Object.entries(statuses)) {
+            const el = document.getElementById(`pipeline-${aid}`);
+            if (el) el.innerHTML = renderPipelineIndicator(stages);
+        }
+    } catch (e) {
+        console.error('Failed to load pipeline status:', e);
+    }
+}
+
+function renderPipelineIndicator(stages) {
+    const stageList = [
+        { key: 'ai_process', label: 'AI分析' },
+        { key: 'embedding', label: '向量化' },
+        { key: 'event_cluster', label: '事件聚类' },
+        { key: 'topic', label: '话题匹配' },
+    ];
+    let html = '';
+    let prevDone = false;
+    stageList.forEach((stage, idx) => {
+        const done = !!stages[stage.key];
+        const cls = done ? 'completed' : 'pending';
+        if (idx > 0) {
+            const connCls = prevDone && done ? 'active' : '';
+            html += `<span class="pipeline-connector ${connCls}"></span>`;
+        }
+        html += `<span class="pipeline-stage ${cls}"><span class="pipeline-stage-dot"></span>${stage.label}</span>`;
+        prevDone = done;
+    });
+    return html;
+}
+
+function toggleExpand(btn) {
+    const content = btn.previousElementSibling;
+    if (content.classList.contains('collapsed')) {
+        content.classList.remove('collapsed');
+        btn.textContent = '收起';
+    } else {
+        content.classList.add('collapsed');
+        btn.textContent = '展开全文';
+    }
+}
+
+async function toggleStar(articleId) {
+    if (!currentUser) {
+        showModal('login');
+        return;
+    }
+    if (userStars.has(articleId)) {
+        userStars.delete(articleId);
+    } else {
+        userStars.add(articleId);
+    }
+    loadArticles();
+}
+
+function renderPagination() {
+    const totalPages = Math.ceil(totalArticles / pageSize);
+    const container = document.getElementById('pagination');
+
+    if (totalPages <= 1) {
+        container.innerHTML = `<span class="page-info">共 ${totalArticles} 篇</span>`;
+        return;
+    }
+
+    let html = '';
+    html += `<button class="page-btn" onclick="goToPage(${currentPage - 1})" ${currentPage === 1 ? 'disabled' : ''}>上一页</button>`;
+
+    const start = Math.max(1, currentPage - 2);
+    const end = Math.min(totalPages, currentPage + 2);
+
+    if (start > 1) {
+        html += `<button class="page-btn" onclick="goToPage(1)">1</button>`;
+        if (start > 2) html += `<span class="page-info">...</span>`;
+    }
+
+    for (let i = start; i <= end; i++) {
+        html += `<button class="page-btn ${i === currentPage ? 'active' : ''}" onclick="goToPage(${i})">${i}</button>`;
+    }
+
+    if (end < totalPages) {
+        if (end < totalPages - 1) html += `<span class="page-info">...</span>`;
+        html += `<button class="page-btn" onclick="goToPage(${totalPages})">${totalPages}</button>`;
+    }
+
+    html += `<button class="page-btn" onclick="goToPage(${currentPage + 1})" ${currentPage === totalPages ? 'disabled' : ''}>下一页</button>`;
+    container.innerHTML = html;
+}
+
+function goToPage(page) {
+    currentPage = page;
+    loadArticles();
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+// ========== 工具函数 ==========
+function renderMarkdown(text) {
+    if (!text) return '';
+    let html = escapeHtml(text);
+    html = html.replace(/^### (.+)$/gm, '<h5>$1</h5>');
+    html = html.replace(/^## (.+)$/gm, '<h4>$1</h4>');
+    html = html.replace(/^# (.+)$/gm, '<h3>$1</h3>');
+    html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+    html = html.replace(/^(\|.+\|)\n\|[-| :]+\|\n((?:\|.+\|\n?)*)/gm, function(match, header, body) {
+        var ths = header.split('|').filter(function(c) { return c.trim(); }).map(function(c) { return '<th>' + c.trim() + '</th>'; }).join('');
+        var rows = body.trim().split('\n').map(function(row) {
+            var tds = row.split('|').filter(function(c) { return c.trim(); }).map(function(c) { return '<td>' + c.trim() + '</td>'; }).join('');
+            return '<tr>' + tds + '</tr>';
+        }).join('');
+        return '<table class="aigc-table"><thead><tr>' + ths + '</tr></thead><tbody>' + rows + '</tbody></table>';
+    });
+    html = html.replace(/^- (.+)$/gm, '<li>$1</li>');
+    html = html.replace(/((?:<li>.*<\/li>\n?)+)/g, '<ul>$1</ul>');
+    html = html.replace(/^\d+\. (.+)$/gm, '<li>$1</li>');
+    html = html.replace(/\n\n/g, '<br><br>');
+    html = html.replace(/\n/g, '<br>');
+    html = html.replace(/(<br>){3,}/g, '<br><br>');
+    return html;
+}
+
+function stripHtml(html) {
+    if (!html) return '';
+    let text = html.replace(/<[^>]*>/g, ' ');
+    const textarea = document.createElement('textarea');
+    textarea.innerHTML = text;
+    text = textarea.value;
+    return text.replace(/\s+/g, ' ').trim();
+}
+
+function formatDate(isoString) {
+    if (!isoString) return '';
+    const date = new Date(isoString);
+    return date.toLocaleDateString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit' });
+}
+</script>
+{% endblock %}

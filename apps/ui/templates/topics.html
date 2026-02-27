@@ -1,0 +1,183 @@
+{% extends "base.html" %}
+
+{% block title %}话题趋势 - ResearchPulse{% endblock %}
+
+{% block extra_styles %}
+<style>
+    .topic-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(350px, 1fr)); gap: 16px; }
+    .topic-card { background: white; border-radius: 12px; padding: 20px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); transition: box-shadow 0.2s; cursor: pointer; }
+    .topic-card:hover { box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
+    .topic-card.active-topic { border-left: 4px solid #4ecdc4; }
+    .topic-card.inactive-topic { border-left: 4px solid #e0e0e0; opacity: 0.7; }
+    .topic-name { font-size: 18px; font-weight: 600; color: #1a1a2e; margin-bottom: 6px; }
+    .topic-desc { font-size: 13px; color: #666; margin-bottom: 10px; line-height: 1.5; }
+    .topic-meta { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 10px; font-size: 12px; }
+    .topic-meta .badge-auto { background: #dbeafe; color: #2563eb; padding: 3px 8px; border-radius: 3px; }
+    .topic-meta .badge-manual { background: #fef3c7; color: #d97706; padding: 3px 8px; border-radius: 3px; }
+    .topic-meta .badge-active { background: #dcfce7; color: #059669; padding: 3px 8px; border-radius: 3px; }
+    .topic-meta .badge-inactive { background: #fee2e2; color: #dc2626; padding: 3px 8px; border-radius: 3px; }
+    .topic-keywords { display: flex; flex-wrap: wrap; gap: 6px; }
+    .keyword-tag { padding: 3px 10px; background: #f3f0ff; border-radius: 12px; font-size: 11px; color: #7c3aed; }
+
+    .topic-detail { background: white; border-radius: 12px; padding: 24px; margin-top: 16px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); display: none; }
+    .topic-detail.show { display: block; }
+    .topic-detail h3 { font-size: 18px; color: #1a1a2e; margin-bottom: 16px; }
+    .topic-articles { margin-top: 12px; }
+    .topic-article-item { padding: 10px 0; border-bottom: 1px solid #f0f0f0; display: flex; justify-content: space-between; align-items: center; }
+    .topic-article-item:last-child { border-bottom: none; }
+    .topic-article-item a { color: #1a1a2e; text-decoration: none; font-size: 14px; flex: 1; }
+    .topic-article-item a:hover { color: #4ecdc4; }
+    .match-score { font-size: 11px; padding: 2px 8px; border-radius: 10px; background: #f5f5f5; color: #888; }
+    .matched-kw { display: flex; gap: 4px; flex-wrap: wrap; }
+    .matched-kw span { font-size: 10px; padding: 2px 6px; border-radius: 3px; background: #ede9fe; color: #7c3aed; }
+
+    .trend-info { margin-top: 12px; padding: 12px; background: #faf8ff; border-radius: 8px; }
+    .trend-info .trend-direction { font-weight: 600; }
+    .trend-info .trend-up { color: #059669; }
+    .trend-info .trend-down { color: #dc2626; }
+    .trend-info .trend-stable { color: #d97706; }
+
+    @media (max-width: 768px) {
+        .topic-grid { grid-template-columns: 1fr; }
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="main">
+    <div class="page-header">
+        <h2>话题趋势</h2>
+    </div>
+    <div class="topic-grid" id="topic-grid">
+        <div class="empty-state" style="grid-column:1/-1;">
+            <div class="icon">&#9203;</div>
+            <div class="text">加载中...</div>
+        </div>
+    </div>
+    <div class="topic-detail" id="topic-detail"></div>
+    <div class="pagination" id="pagination"></div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    const NAV_ACTIVE = 'topics';
+    let currentPage = 1;
+    const pageSize = 50;
+    let totalTopics = 0;
+
+    async function loadTopics() {
+        const offset = (currentPage - 1) * pageSize;
+        try {
+            const res = await fetch(`${API_BASE}/topics?limit=${pageSize}&offset=${offset}`, { headers: getAuthHeaders() });
+            if (!res.ok) {
+                const err = await res.json().catch(() => ({}));
+                let errMsg = err.detail || '加载失败，请确认已登录且功能已启用';
+                if (res.status === 503 && err.detail && err.detail.includes('not enabled')) {
+                    errMsg = '话题雷达功能尚未启用，请联系管理员在管理后台开启此功能。';
+                }
+                document.getElementById('topic-grid').innerHTML = `<div class="empty-state" style="grid-column:1/-1;"><div class="icon">&#128274;</div><div class="text">${errMsg}</div></div>`;
+                return;
+            }
+            const data = await res.json();
+            totalTopics = data.total;
+            renderTopics(data.topics);
+            renderPaginationFn();
+        } catch(e) {
+            document.getElementById('topic-grid').innerHTML = '<div class="empty-state" style="grid-column:1/-1;"><div class="icon">&#10060;</div><div class="text">网络错误</div></div>';
+        }
+    }
+
+    function renderTopics(topics) {
+        const container = document.getElementById('topic-grid');
+        if (!topics || topics.length === 0) {
+            container.innerHTML = '<div class="empty-state" style="grid-column:1/-1;"><div class="icon">&#128269;</div><div class="text">暂无话题数据</div></div>';
+            return;
+        }
+        container.innerHTML = topics.map(t => {
+            const cls = t.is_active ? 'active-topic' : 'inactive-topic';
+            const typeBadge = t.is_auto_discovered ? '<span class="badge-auto">自动发现</span>' : '<span class="badge-manual">手动创建</span>';
+            const statusBadge = t.is_active ? '<span class="badge-active">活跃</span>' : '<span class="badge-inactive">已停用</span>';
+            const keywords = (t.keywords && Array.isArray(t.keywords)) ? t.keywords.slice(0, 8).map(kw => `<span class="keyword-tag">${escapeHtml(String(kw))}</span>`).join('') : '';
+            return `
+                <div class="topic-card ${cls}" onclick="loadTopicDetail(${t.id})">
+                    <div class="topic-name">${escapeHtml(t.name)}</div>
+                    ${t.description ? `<div class="topic-desc">${escapeHtml(t.description)}</div>` : ''}
+                    <div class="topic-meta">${typeBadge} ${statusBadge}</div>
+                    ${keywords ? `<div class="topic-keywords">${keywords}</div>` : ''}
+                </div>
+            `;
+        }).join('');
+    }
+
+    async function loadTopicDetail(topicId) {
+        const detailEl = document.getElementById('topic-detail');
+        detailEl.classList.add('show');
+        detailEl.innerHTML = '<div style="text-align:center;padding:20px;color:#888;">加载中...</div>';
+
+        try {
+            const [articlesRes, trendRes] = await Promise.all([
+                fetch(`${API_BASE}/topics/${topicId}/articles?limit=20`, { headers: getAuthHeaders() }),
+                fetch(`${API_BASE}/topics/${topicId}/trend`, { headers: getAuthHeaders() }).catch(() => null),
+            ]);
+
+            let articlesHtml = '';
+            if (articlesRes.ok) {
+                const articlesData = await articlesRes.json();
+                const articles = articlesData.articles || [];
+                if (articles.length > 0) {
+                    articlesHtml = '<h4 style="font-size:13px;color:#888;margin-bottom:8px;">关联文章</h4>' +
+                        articles.map(a => `
+                            <div class="topic-article-item">
+                                <a href="${escapeHtml(a.url || '#')}" target="_blank">${escapeHtml(a.title || '文章 #' + a.article_id)}</a>
+                                <div style="display:flex;gap:8px;align-items:center;">
+                                    ${a.matched_keywords ? `<div class="matched-kw">${(Array.isArray(a.matched_keywords) ? a.matched_keywords : []).map(kw => `<span>${escapeHtml(String(kw))}</span>`).join('')}</div>` : ''}
+                                    <span class="match-score">${(a.match_score || 0).toFixed(2)}</span>
+                                </div>
+                            </div>
+                        `).join('');
+                } else {
+                    articlesHtml = '<div style="color:#999;font-size:13px;">暂无关联文章</div>';
+                }
+            }
+
+            let trendHtml = '';
+            if (trendRes && trendRes.ok) {
+                const trendData = await trendRes.json();
+                const dir = trendData.direction || 'stable';
+                const dirClass = dir === 'up' ? 'trend-up' : dir === 'down' ? 'trend-down' : 'trend-stable';
+                const dirLabel = dir === 'up' ? '&#9650; 上升' : dir === 'down' ? '&#9660; 下降' : '&#9644; 稳定';
+                const change = trendData.change_percent !== undefined ? `${trendData.change_percent > 0 ? '+' : ''}${trendData.change_percent.toFixed(1)}%` : '';
+                trendHtml = `
+                    <div class="trend-info">
+                        <span class="trend-direction ${dirClass}">${dirLabel}</span>
+                        ${change ? `<span style="margin-left:12px;font-size:13px;color:#666;">变化: ${change}</span>` : ''}
+                        ${trendData.current_count !== undefined ? `<span style="margin-left:12px;font-size:13px;color:#666;">当前: ${trendData.current_count} 篇</span>` : ''}
+                    </div>
+                `;
+            }
+
+            detailEl.innerHTML = `
+                <div style="display:flex;justify-content:space-between;align-items:center;">
+                    <h3>话题详情</h3>
+                    <span style="cursor:pointer;font-size:20px;color:#999;" onclick="document.getElementById('topic-detail').classList.remove('show')">&#10005;</span>
+                </div>
+                ${trendHtml}
+                <div class="topic-articles">${articlesHtml}</div>
+            `;
+        } catch(e) {
+            detailEl.innerHTML = '<div style="color:#dc2626;padding:20px;text-align:center;">加载失败</div>';
+        }
+
+        detailEl.scrollIntoView({ behavior: 'smooth' });
+    }
+
+    function renderPaginationFn() {
+        renderPagination(document.getElementById('pagination'), totalTopics, pageSize, currentPage, 'goToPage');
+    }
+
+    function goToPage(p) { currentPage = p; loadTopics(); window.scrollTo({top:0,behavior:'smooth'}); }
+
+    checkAuth().then(() => loadTopics());
+</script>
+{% endblock %}

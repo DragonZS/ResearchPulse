@@ -1,0 +1,159 @@
+{% extends "base.html" %}
+
+{% block title %}事件聚类 - ResearchPulse{% endblock %}
+
+{% block extra_styles %}
+<style>
+    .event-list { display: flex; flex-direction: column; gap: 16px; }
+    .event-card { background: white; border-radius: 12px; padding: 20px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); transition: box-shadow 0.2s; }
+    .event-card:hover { box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
+    .event-title { font-size: 18px; font-weight: 600; color: #1a1a2e; margin-bottom: 8px; }
+    .event-meta { display: flex; flex-wrap: wrap; gap: 16px; font-size: 13px; color: #666; margin-bottom: 12px; }
+    .event-meta span { display: flex; align-items: center; gap: 4px; }
+    .event-desc { color: #555; font-size: 14px; line-height: 1.6; margin-bottom: 12px; }
+    .event-members { border-top: 1px solid #f0f0f0; padding-top: 12px; }
+    .event-members h4 { font-size: 13px; color: #888; margin-bottom: 8px; cursor: pointer; }
+    .member-list { display: none; }
+    .member-list.open { display: block; }
+    .member-item { padding: 8px 0; border-bottom: 1px solid #f8f8f8; display: flex; justify-content: space-between; align-items: center; font-size: 13px; }
+    .member-item:last-child { border-bottom: none; }
+    .member-item a { color: #1a1a2e; text-decoration: none; }
+    .member-item a:hover { color: #4ecdc4; }
+    .member-score { font-size: 11px; color: #888; background: #f5f5f5; padding: 2px 8px; border-radius: 10px; }
+    .member-method { font-size: 10px; color: #764ba2; background: #ede9fe; padding: 2px 6px; border-radius: 3px; }
+
+    @media (max-width: 768px) {
+        .event-card { padding: 16px; }
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="main">
+    <div class="page-header">
+        <h2>事件聚类</h2>
+        <div class="filter-bar">
+            <select id="filter-active" onchange="loadEvents()">
+                <option value="true">仅活跃事件</option>
+                <option value="false">全部事件</option>
+            </select>
+        </div>
+    </div>
+    <div class="event-list" id="event-list">
+        <div class="empty-state">
+            <div class="icon">&#9203;</div>
+            <div class="text">加载中...</div>
+        </div>
+    </div>
+    <div class="pagination" id="pagination"></div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    const NAV_ACTIVE = 'events';
+    let currentPage = 1;
+    const pageSize = 20;
+    let totalEvents = 0;
+
+    async function loadEvents() {
+        const activeOnly = document.getElementById('filter-active').value;
+        const offset = (currentPage - 1) * pageSize;
+        const headers = getAuthHeaders();
+
+        try {
+            const res = await fetch(`${API_BASE}/events?active_only=${activeOnly}&limit=${pageSize}&offset=${offset}`, { headers });
+            if (!res.ok) {
+                const err = await res.json().catch(() => ({}));
+                let errMsg = err.detail || '加载失败，请确认已登录且功能已启用';
+                if (res.status === 503 && err.detail && err.detail.includes('not enabled')) {
+                    errMsg = '事件聚类功能尚未启用，请联系管理员在管理后台开启此功能。';
+                }
+                document.getElementById('event-list').innerHTML = `<div class="empty-state"><div class="icon">&#128274;</div><div class="text">${errMsg}</div></div>`;
+                return;
+            }
+            const data = await res.json();
+            totalEvents = data.total;
+            renderEvents(data.events);
+            renderPaginationFn();
+        } catch(e) {
+            document.getElementById('event-list').innerHTML = `<div class="empty-state"><div class="icon">&#10060;</div><div class="text">网络错误</div></div>`;
+        }
+    }
+
+    function renderEvents(events) {
+        const container = document.getElementById('event-list');
+        if (!events || events.length === 0) {
+            container.innerHTML = '<div class="empty-state"><div class="icon">&#128218;</div><div class="text">暂无事件聚类数据</div></div>';
+            return;
+        }
+        container.innerHTML = events.map((ev, idx) => {
+            const statusBadge = ev.is_active ? '<span class="badge-active">活跃</span>' : '<span class="badge-inactive">已结束</span>';
+            const categoryBadge = ev.category ? `<span class="badge-category">${escapeHtml(ev.category)}</span>` : '';
+            const firstSeen = ev.first_seen_at ? formatDate(ev.first_seen_at) : '未知';
+            const lastUpdated = ev.last_updated_at ? formatDate(ev.last_updated_at) : '未知';
+            return `
+                <div class="event-card">
+                    <div class="event-title">${escapeHtml(ev.title)}</div>
+                    <div class="event-meta">
+                        ${statusBadge} ${categoryBadge}
+                        <span>&#128196; ${ev.article_count || 0} 篇文章</span>
+                        <span>&#128197; 首次: ${firstSeen}</span>
+                        <span>&#128260; 更新: ${lastUpdated}</span>
+                    </div>
+                    ${ev.description ? `<div class="event-desc">${escapeHtml(ev.description)}</div>` : ''}
+                    <div class="event-members">
+                        <h4 onclick="toggleMembers(${idx})">&#9654; 查看关联文章</h4>
+                        <div class="member-list" id="members-${idx}">
+                            <div style="color:#999;font-size:12px;padding:8px 0;">点击加载详情...</div>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }).join('');
+
+        window._events = events;
+    }
+
+    async function toggleMembers(idx) {
+        const el = document.getElementById(`members-${idx}`);
+        if (el.classList.contains('open')) {
+            el.classList.remove('open');
+            return;
+        }
+        el.classList.add('open');
+        const ev = window._events[idx];
+        if (!ev || !ev.id) return;
+
+        const headers = getAuthHeaders();
+        try {
+            const res = await fetch(`${API_BASE}/events/${ev.id}`, { headers });
+            if (!res.ok) { el.innerHTML = '<div style="color:#dc2626;padding:8px 0;font-size:12px;">加载失败</div>'; return; }
+            const detail = await res.json();
+            if (!detail.members || detail.members.length === 0) {
+                el.innerHTML = '<div style="color:#999;padding:8px 0;font-size:12px;">暂无关联文章</div>';
+                return;
+            }
+            el.innerHTML = detail.members.map(m => `
+                <div class="member-item">
+                    <a href="${APP_BASE}/" title="文章 #${m.article_id}">文章 #${m.article_id}</a>
+                    <div>
+                        <span class="member-method">${escapeHtml(m.detection_method || '')}</span>
+                        <span class="member-score">相似度: ${(m.similarity_score || 0).toFixed(2)}</span>
+                    </div>
+                </div>
+            `).join('');
+        } catch(e) {
+            el.innerHTML = '<div style="color:#dc2626;padding:8px 0;font-size:12px;">网络错误</div>';
+        }
+    }
+
+    function renderPaginationFn() {
+        renderPagination(document.getElementById('pagination'), totalEvents, pageSize, currentPage, 'goToPage');
+    }
+
+    function goToPage(p) { currentPage = p; loadEvents(); window.scrollTo({top:0,behavior:'smooth'}); }
+
+    checkAuth().then(() => loadEvents());
+</script>
+{% endblock %}

@@ -1,0 +1,173 @@
+{% extends "base.html" %}
+
+{% block title %}行动建议 - ResearchPulse{% endblock %}
+
+{% block extra_styles %}
+<style>
+    .action-list { display: flex; flex-direction: column; gap: 12px; }
+    .action-card { background: white; border-radius: 12px; padding: 16px 20px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); display: flex; justify-content: space-between; align-items: center; transition: box-shadow 0.2s; }
+    .action-card:hover { box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
+    .action-card.status-completed { opacity: 0.6; }
+    .action-card.status-dismissed { opacity: 0.4; text-decoration: line-through; }
+    .action-left { flex: 1; }
+    .action-desc { font-size: 14px; color: #333; margin-bottom: 6px; line-height: 1.5; }
+    .action-meta { display: flex; flex-wrap: wrap; gap: 8px; font-size: 12px; }
+    .action-right { display: flex; gap: 8px; flex-shrink: 0; margin-left: 16px; }
+    .action-btn { padding: 6px 14px; border-radius: 6px; font-size: 12px; cursor: pointer; border: 1px solid #e0e0e0; background: white; transition: all 0.2s; }
+    .action-btn.complete { color: #059669; border-color: #dcfce7; }
+    .action-btn.complete:hover { background: #dcfce7; }
+    .action-btn.dismiss { color: #dc2626; border-color: #fee2e2; }
+    .action-btn.dismiss:hover { background: #fee2e2; }
+
+    @media (max-width: 768px) {
+        .action-card { flex-direction: column; align-items: flex-start; }
+        .action-right { margin-left: 0; margin-top: 12px; }
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="main">
+    <div class="page-header">
+        <h2>行动建议</h2>
+        <div class="filter-bar">
+            <select id="filter-status" onchange="loadActions()">
+                <option value="">全部状态</option>
+                <option value="pending" selected>待处理</option>
+                <option value="completed">已完成</option>
+                <option value="dismissed">已忽略</option>
+            </select>
+            <select id="filter-priority" onchange="loadActions()">
+                <option value="">全部优先级</option>
+                <option value="高">高</option>
+                <option value="中">中</option>
+                <option value="低">低</option>
+            </select>
+        </div>
+    </div>
+    <div class="stats-row" id="stats-row">
+        <div class="stat-card"><div class="value" id="stat-pending">-</div><div class="label">待处理</div></div>
+        <div class="stat-card"><div class="value" id="stat-completed">-</div><div class="label">已完成</div></div>
+        <div class="stat-card"><div class="value" id="stat-dismissed">-</div><div class="label">已忽略</div></div>
+    </div>
+    <div class="action-list" id="action-list">
+        <div class="empty-state">
+            <div class="icon">&#9203;</div>
+            <div class="text">加载中...</div>
+        </div>
+    </div>
+    <div class="pagination" id="pagination"></div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    const NAV_ACTIVE = 'actions';
+    let currentPage = 1;
+    const pageSize = 20;
+    let totalActions = 0;
+
+    async function loadActions() {
+        const status = document.getElementById('filter-status').value;
+        const priority = document.getElementById('filter-priority').value;
+        const offset = (currentPage - 1) * pageSize;
+
+        const params = new URLSearchParams({ limit: pageSize, offset });
+        if (status) params.append('status', status);
+        if (priority) params.append('priority', priority);
+
+        try {
+            const res = await fetch(`${API_BASE}/actions?${params}`, { headers: getHeaders() });
+            if (!res.ok) {
+                const err = await res.json().catch(() => ({}));
+                let errMsg = err.detail || '加载失败，请确认已登录且功能已启用';
+                if (res.status === 503 && err.detail && err.detail.includes('not enabled')) {
+                    errMsg = '行动建议功能尚未启用，请联系管理员在管理后台开启此功能。';
+                }
+                document.getElementById('action-list').innerHTML = `<div class="empty-state"><div class="icon">&#128274;</div><div class="text">${errMsg}</div></div>`;
+                return;
+            }
+            const data = await res.json();
+            totalActions = data.total || 0;
+            renderActions(data.actions || data.items || []);
+            renderPaginationFn();
+        } catch(e) {
+            document.getElementById('action-list').innerHTML = '<div class="empty-state"><div class="icon">&#10060;</div><div class="text">网络错误</div></div>';
+        }
+
+        loadStats();
+    }
+
+    async function loadStats() {
+        for (const st of ['pending', 'completed', 'dismissed']) {
+            try {
+                const res = await fetch(`${API_BASE}/actions?status=${st}&limit=1&offset=0`, { headers: getHeaders() });
+                if (res.ok) {
+                    const data = await res.json();
+                    const el = document.getElementById(`stat-${st}`);
+                    if (el) el.textContent = data.total || 0;
+                }
+            } catch(e) {}
+        }
+    }
+
+    function renderActions(actions) {
+        const container = document.getElementById('action-list');
+        if (!actions || actions.length === 0) {
+            container.innerHTML = '<div class="empty-state"><div class="icon">&#9989;</div><div class="text">暂无行动建议</div></div>';
+            return;
+        }
+        container.innerHTML = actions.map(a => {
+            const priorityMap = { '高': 'high', '中': 'medium', '低': 'low', 'high': 'high', 'medium': 'medium', 'low': 'low' };
+            const pClass = priorityMap[a.priority] || 'medium';
+            const statusCls = a.status || 'pending';
+            const isPending = statusCls === 'pending';
+            return `
+                <div class="action-card status-${statusCls}">
+                    <div class="action-left">
+                        <div class="action-desc">${escapeHtml(a.description || '')}</div>
+                        <div class="action-meta">
+                            <span class="priority-badge ${pClass}">${escapeHtml(a.priority || '中')}</span>
+                            ${a.type ? `<span class="type-badge">${escapeHtml(a.type)}</span>` : ''}
+                            <span class="status-badge ${statusCls}">${statusCls === 'pending' ? '待处理' : statusCls === 'completed' ? '已完成' : '已忽略'}</span>
+                            ${a.article_id ? `<span style="color:#888;">文章 #${a.article_id}</span>` : ''}
+                        </div>
+                    </div>
+                    ${isPending ? `
+                        <div class="action-right">
+                            <button class="action-btn complete" onclick="updateAction(${a.id}, 'completed')">&#9989; 完成</button>
+                            <button class="action-btn dismiss" onclick="updateAction(${a.id}, 'dismissed')">&#10005; 忽略</button>
+                        </div>
+                    ` : ''}
+                </div>
+            `;
+        }).join('');
+    }
+
+    async function updateAction(id, newStatus) {
+        try {
+            const res = await fetch(`${API_BASE}/actions/${id}`, {
+                method: 'PUT',
+                headers: getHeaders(),
+                body: JSON.stringify({ status: newStatus }),
+            });
+            if (res.ok) {
+                loadActions();
+            } else {
+                const err = await res.json().catch(() => ({}));
+                alert(err.detail || '操作失败');
+            }
+        } catch(e) {
+            alert('网络错误');
+        }
+    }
+
+    function renderPaginationFn() {
+        renderPagination(document.getElementById('pagination'), totalActions, pageSize, currentPage, 'goToPage');
+    }
+
+    function goToPage(p) { currentPage = p; loadActions(); window.scrollTo({top:0,behavior:'smooth'}); }
+
+    checkAuth().then(() => loadActions());
+</script>
+{% endblock %}

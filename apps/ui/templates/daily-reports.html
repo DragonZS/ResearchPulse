@@ -1,0 +1,634 @@
+{% extends "base.html" %}
+
+{% block title %}每日 arXiv 报告 - ResearchPulse{% endblock %}
+
+{% block extra_styles %}
+<style>
+    .filter-bar input { padding: 8px 14px; border: 1px solid #e0e0e0; border-radius: 6px; font-size: 13px; background: white; }
+    .filter-bar input[type="date"] { width: 140px; }
+    .filter-bar button.secondary { background: #4ecdc4; color: #1a1a2e; }
+    .filter-bar button.secondary:hover { background: #3dbdb5; }
+
+    .report-list { display: flex; flex-direction: column; gap: 16px; }
+    .report-card { background: white; border-radius: 12px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); transition: box-shadow 0.2s; overflow: hidden; }
+    .report-card:hover { box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
+    .report-header { padding: 20px; cursor: pointer; display: flex; justify-content: space-between; align-items: flex-start; }
+    .report-info { flex: 1; }
+    .report-title { font-size: 17px; font-weight: 600; color: #1a1a2e; margin-bottom: 8px; }
+    .report-meta { display: flex; flex-wrap: wrap; gap: 12px; font-size: 13px; color: #666; }
+    .report-category { padding: 3px 10px; border-radius: 3px; font-size: 11px; font-weight: 600; background: #dbeafe; color: #2563eb; }
+    .report-status { padding: 3px 10px; border-radius: 3px; font-size: 11px; font-weight: 600; }
+    .report-status.draft { background: #fef3c7; color: #d97706; }
+    .report-status.published { background: #d1fae5; color: #059669; }
+    .report-actions { display: flex; gap: 8px; margin-left: 16px; }
+    .report-actions button { padding: 6px 12px; border: 1px solid #e0e0e0; border-radius: 4px; font-size: 12px; background: white; cursor: pointer; }
+    .report-actions button.primary { background: #1a1a2e; color: white; border: none; }
+
+    .report-content { padding: 0 20px 20px; display: none; border-top: 1px solid #f0f0f0; }
+    .report-content.open { display: block; }
+    .report-body { padding-top: 16px; font-size: 14px; color: #444; line-height: 1.8; max-height: 800px; overflow-y: auto; }
+
+    /* 报告摘要徽章 */
+    .report-summary-badge { display: inline-flex; align-items: center; gap: 8px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 10px 20px; border-radius: 25px; font-size: 14px; font-weight: 500; margin: 16px 0; box-shadow: 0 4px 15px rgba(102, 126, 234, 0.3); }
+
+    /* 论文卡片容器 */
+    .articles-container { display: flex; flex-direction: column; gap: 16px; margin: 20px 0; }
+    .article-card { background: #ffffff; border: 1px solid #e8e8e8; border-radius: 12px; padding: 20px; transition: all 0.3s ease; box-shadow: 0 2px 8px rgba(0,0,0,0.04); }
+    .article-card:hover { box-shadow: 0 8px 25px rgba(0,0,0,0.08); border-color: #d0d0d0; transform: translateY(-2px); }
+    .article-header { display: flex; align-items: flex-start; gap: 12px; margin-bottom: 12px; }
+    .article-index { background: linear-gradient(135deg, #4ecdc4 0%, #44a08d 100%); color: white; font-size: 12px; font-weight: 600; padding: 4px 10px; border-radius: 15px; flex-shrink: 0; }
+    .article-title { font-size: 16px; font-weight: 600; color: #1a1a2e; margin: 0; line-height: 1.5; flex: 1; }
+    .article-original-title { font-size: 13px; color: #666; background: #f8f9fa; padding: 8px 12px; border-radius: 6px; margin-bottom: 12px; font-style: italic; }
+    .article-meta-row { display: flex; flex-wrap: wrap; align-items: center; gap: 16px; margin-bottom: 16px; }
+    .article-authors { display: flex; align-items: center; gap: 6px; font-size: 13px; color: #666; }
+    .article-link { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: #2563eb; text-decoration: none; padding: 4px 12px; background: #eff6ff; border-radius: 15px; transition: all 0.2s; }
+    .article-link:hover { background: #dbeafe; }
+    .article-content { background: #fafbfc; border-radius: 8px; padding: 16px; }
+    .article-summary-label { font-size: 12px; font-weight: 600; color: #764ba2; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px; }
+    .article-summary { font-size: 14px; color: #555; line-height: 1.8; }
+
+    /* 统计区域 */
+    .report-stats-section { background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%); border-radius: 12px; padding: 20px; margin: 20px 0; }
+    .stats-title { font-size: 16px; font-weight: 600; color: #1a1a2e; margin: 0 0 16px 0; }
+    .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; }
+    .stat-item { background: white; padding: 12px 16px; border-radius: 8px; display: flex; justify-content: space-between; align-items: center; }
+    .stat-label { font-size: 13px; color: #666; }
+    .stat-value { font-size: 14px; font-weight: 600; color: #1a1a2e; }
+
+    /* 报告底部 */
+    .report-footer { text-align: center; padding: 16px 0; margin-top: 16px; border-top: 1px dashed #e0e0e0; }
+    .report-footer span { display: block; font-size: 12px; color: #888; margin: 4px 0; }
+
+    /* 任务进度条样式 */
+    .task-progress-bar { height: 8px; background: #e0e0e0; border-radius: 4px; overflow: hidden; margin: 8px 0; }
+    .task-progress-bar .progress { height: 100%; background: linear-gradient(90deg, #4ecdc4, #44a08d); transition: width 0.3s; }
+    .task-status { display: flex; align-items: center; gap: 12px; margin: 12px 0; padding: 12px; background: #f8f9fa; border-radius: 8px; }
+    .task-status.pending { background: #fff3cd; }
+    .task-status.running { background: #d1ecf1; }
+    .task-status.completed { background: #d4edda; }
+    .task-status.failed { background: #f8d7da; }
+    .task-status .spinner { width: 20px; height: 20px; border: 2px solid #e0e0e0; border-top-color: #4ecdc4; border-radius: 50%; animation: spin 1s linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .loading-spinner { display: inline-block; width: 16px; height: 16px; border: 2px solid #e0e0e0; border-top-color: #4ecdc4; border-radius: 50%; animation: spin 1s linear infinite; margin-right: 8px; vertical-align: middle; }
+
+    /* Modal */
+    .modal-overlay { display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.5); z-index: 200; justify-content: center; align-items: center; }
+    .modal-overlay.open { display: flex; }
+    .modal-dialog { background: white; border-radius: 12px; max-width: 800px; width: 90%; max-height: 80vh; display: flex; flex-direction: column; }
+    .modal-header { padding: 20px; border-bottom: 1px solid #e0e0e0; display: flex; justify-content: space-between; align-items: center; }
+    .modal-header h3 { font-size: 18px; color: #1a1a2e; }
+    .modal-header .close { background: none; border: none; font-size: 24px; cursor: pointer; color: #888; }
+    .modal-body { padding: 20px; overflow-y: auto; flex: 1; }
+    .modal-footer { padding: 16px 20px; border-top: 1px solid #e0e0e0; display: flex; justify-content: flex-end; gap: 12px; }
+    .modal-footer button { padding: 8px 16px; border-radius: 6px; font-size: 14px; cursor: pointer; }
+    .modal-footer button.cancel { background: #f5f5f5; border: 1px solid #e0e0e0; }
+    .modal-footer button.primary { background: #1a1a2e; color: white; border: none; }
+
+    .generate-form { display: flex; flex-direction: column; gap: 16px; }
+    .form-group { display: flex; flex-direction: column; gap: 6px; }
+    .form-group label { font-size: 14px; font-weight: 500; color: #333; }
+    .form-group input, .form-group select { padding: 10px 12px; border: 1px solid #e0e0e0; border-radius: 6px; font-size: 14px; }
+    .form-group .hint { font-size: 12px; color: #888; }
+
+    .toast-message { position: fixed; bottom: 24px; right: 24px; padding: 12px 20px; border-radius: 8px; font-size: 14px; z-index: 300; animation: slideIn 0.3s ease; }
+    .toast-message.success { background: #d1fae5; color: #059669; }
+    .toast-message.error { background: #fee2e2; color: #dc2626; }
+    .toast-message.info { background: #dbeafe; color: #2563eb; }
+    @keyframes slideIn { from { transform: translateX(100%); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+
+    @media (max-width: 768px) {
+        .page-header { flex-direction: column; gap: 12px; align-items: flex-start; }
+        .report-header { flex-direction: column; }
+        .report-actions { margin-left: 0; margin-top: 12px; }
+        .article-header { flex-direction: column; gap: 8px; }
+        .article-meta-row { flex-direction: column; align-items: flex-start; gap: 8px; }
+        .stats-grid { grid-template-columns: 1fr; }
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="main">
+    <div class="page-header">
+        <h2>每日 arXiv 报告</h2>
+        <div class="filter-bar">
+            <input type="date" id="filter-date" onchange="loadReports()">
+            <select id="filter-category" onchange="loadReports()">
+                <option value="">全部分类</option>
+            </select>
+            <button onclick="openGenerateModal()" class="secondary">&#9889; 生成报告</button>
+        </div>
+    </div>
+    <!-- 页面级任务状态显示 -->
+    <div id="page-task-status" style="display:none; margin-bottom: 16px;">
+        <div class="task-status" id="page-task-box">
+            <div class="spinner" id="page-task-spinner"></div>
+            <div style="flex:1;">
+                <div id="page-task-text" style="font-weight: 500;"></div>
+                <div class="task-progress-bar">
+                    <div class="progress" id="page-progress-bar" style="width: 0%;"></div>
+                </div>
+                <div id="page-progress-message" style="font-size: 12px; color: #666;"></div>
+            </div>
+            <button onclick="hidePageTaskStatus()" style="background:none; border:none; font-size:18px; cursor:pointer; color:#888;">&times;</button>
+        </div>
+    </div>
+    <div class="report-list" id="report-list">
+        <div class="empty-state">
+            <div class="icon">&#9203;</div>
+            <div class="text">加载中...</div>
+        </div>
+    </div>
+    <div class="pagination" id="pagination"></div>
+</div>
+
+<!-- 生成报告弹窗 -->
+<div class="modal-overlay" id="generate-modal">
+    <div class="modal-dialog">
+        <div class="modal-header">
+            <h3>生成每日报告</h3>
+            <button class="close" onclick="closeGenerateModal()">&times;</button>
+        </div>
+        <div class="modal-body">
+            <div class="generate-form">
+                <div class="form-group">
+                    <label>报告日期</label>
+                    <input type="date" id="generate-date">
+                    <div class="hint">默认为昨天</div>
+                </div>
+                <div class="form-group">
+                    <label>分类（可多选）</label>
+                    <select id="generate-categories" multiple style="height: 120px;">
+                        <option value="">使用默认配置</option>
+                    </select>
+                    <div class="hint">按住 Ctrl/Cmd 可多选，不选则使用系统配置的默认分类</div>
+                </div>
+            </div>
+        </div>
+        <div class="modal-footer">
+            <button class="cancel" onclick="closeGenerateModal()">取消</button>
+            <button class="primary" id="generate-btn" onclick="generateReports()">生成</button>
+        </div>
+        <!-- 任务进度显示区域 -->
+        <div id="task-progress-area" style="display:none; padding: 16px; border-top: 1px solid #e0e0e0;">
+            <div class="task-status" id="task-status-box">
+                <div class="spinner" id="task-spinner"></div>
+                <div style="flex:1;">
+                    <div id="task-status-text" style="font-weight: 500;">准备中...</div>
+                    <div class="task-progress-bar">
+                        <div class="progress" id="task-progress-bar" style="width: 0%;"></div>
+                    </div>
+                    <div id="task-progress-message" style="font-size: 12px; color: #666;"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- 导出弹窗 -->
+<div class="modal-overlay" id="export-modal">
+    <div class="modal-dialog">
+        <div class="modal-header">
+            <h3>导出报告</h3>
+            <button class="close" onclick="closeExportModal()">&times;</button>
+        </div>
+        <div class="modal-body">
+            <div id="export-content" style="font-family: monospace; white-space: pre-wrap; background: #f5f5f5; padding: 16px; border-radius: 8px; max-height: 400px; overflow-y: auto; font-size: 13px; line-height: 1.6;"></div>
+        </div>
+        <div class="modal-footer">
+            <button class="cancel" onclick="closeExportModal()">关闭</button>
+            <button class="primary" onclick="copyExportContent()">复制内容</button>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    const NAV_ACTIVE = 'daily-reports';
+    let currentPage = 1;
+    const pageSize = 20;
+    let totalReports = 0;
+    let categories = [];
+    let currentTaskId = null;
+    let pollingInterval = null;
+
+    // 设置默认日期为昨天
+    const yesterday = new Date();
+    yesterday.setDate(yesterday.getDate() - 1);
+    document.getElementById('filter-date').value = yesterday.toISOString().split('T')[0];
+    document.getElementById('generate-date').value = yesterday.toISOString().split('T')[0];
+
+    async function loadCategories() {
+        try {
+            const res = await fetch(`${API_BASE}/categories?source_type=arxiv`, { headers: getAuthHeaders() });
+            if (res.ok) {
+                const data = await res.json();
+                categories = data.categories || [];
+                
+                const filterSelect = document.getElementById('filter-category');
+                filterSelect.innerHTML = '<option value="">全部分类</option>';
+                categories.forEach(c => {
+                    const name = c.name_zh || c.name || c.code;
+                    filterSelect.innerHTML += `<option value="${c.code}">${c.code} - ${name}</option>`;
+                });
+                
+                const genSelect = document.getElementById('generate-categories');
+                genSelect.innerHTML = '<option value="">使用默认配置</option>';
+                categories.forEach(c => {
+                    const name = c.name_zh || c.name || c.code;
+                    genSelect.innerHTML += `<option value="${c.code}">${c.code} - ${name}</option>`;
+                });
+            }
+        } catch(e) {}
+    }
+
+    async function loadReports() {
+        const date = document.getElementById('filter-date').value;
+        const category = document.getElementById('filter-category').value;
+
+        const params = new URLSearchParams({ page: currentPage, page_size: pageSize });
+        if (date) params.append('report_date', date);
+        if (category) params.append('category', category);
+
+        try {
+            const res = await fetch(`${API_BASE}/daily-reports?${params}`, { headers: getHeaders() });
+            if (!res.ok) {
+                const err = await res.json().catch(() => ({}));
+                let errMsg = err.detail || '加载失败';
+                if (res.status === 404) errMsg = '暂无该日期的报告数据，可以点击"生成报告"手动生成';
+                else if (res.status === 401) errMsg = '请先登录';
+                document.getElementById('report-list').innerHTML = `<div class="empty-state"><div class="icon">&#128274;</div><div class="text">${errMsg}</div></div>`;
+                return;
+            }
+            const data = await res.json();
+            totalReports = data.total || 0;
+            renderReports(data.reports || []);
+            renderPaginationFn();
+        } catch(e) {
+            document.getElementById('report-list').innerHTML = '<div class="empty-state"><div class="icon">&#10060;</div><div class="text">网络错误</div></div>';
+        }
+    }
+
+    function renderReports(reports) {
+        const container = document.getElementById('report-list');
+        if (!reports || reports.length === 0) {
+            container.innerHTML = '<div class="empty-state"><div class="icon">&#128203;</div><div class="text">暂无报告数据<br><small>可以尝试修改筛选条件或手动生成报告</small></div></div>';
+            return;
+        }
+        window._reportIds = reports.map(r => r.id);
+        container.innerHTML = reports.map((r, idx) => {
+            const statusClass = r.status || 'draft';
+            const statusLabel = statusClass === 'draft' ? '草稿' : statusClass === 'published' ? '已发布' : statusClass;
+            const created = r.created_at ? formatDate(r.created_at) : '';
+
+            return `
+                <div class="report-card">
+                    <div class="report-header" onclick="toggleReport(${idx})">
+                        <div class="report-info">
+                            <div class="report-title">${escapeHtml(r.title || '无标题')}</div>
+                            <div class="report-meta">
+                                <span class="report-category">${r.category} - ${r.category_name}</span>
+                                <span class="report-status ${statusClass}">${statusLabel}</span>
+                                <span>&#128197; ${r.report_date}</span>
+                                <span>&#128196; ${r.article_count} 篇论文</span>
+                                ${created ? `<span>&#128336; ${created}</span>` : ''}
+                            </div>
+                        </div>
+                        <div class="report-actions" onclick="event.stopPropagation()">
+                            <button onclick="exportReport(${r.id}, 'markdown')">MD</button>
+                            <button class="primary" onclick="exportReport(${r.id}, 'wechat')">微信格式</button>
+                        </div>
+                    </div>
+                    <div class="report-content" id="report-content-${idx}" data-report-id="${r.id}" data-loaded="false">
+                        <div class="report-body" style="color:#999;text-align:center;padding:20px;">点击展开查看详情</div>
+                    </div>
+                </div>
+            `;
+        }).join('');
+    }
+
+    window._loadedReports = {};
+
+    async function toggleReport(idx) {
+        const el = document.getElementById(`report-content-${idx}`);
+        const isOpen = el.classList.contains('open');
+        el.classList.toggle('open');
+
+        if (!isOpen) {
+            const reportId = el.dataset.reportId;
+            const loaded = el.dataset.loaded === 'true';
+
+            if (!loaded && reportId) {
+                const bodyEl = el.querySelector('.report-body');
+                bodyEl.innerHTML = '<div style="text-align:center;padding:20px;"><span class="loading-spinner"></span> 加载中...</div>';
+
+                try {
+                    if (window._loadedReports[reportId]) {
+                        bodyEl.innerHTML = renderMarkdown(window._loadedReports[reportId].content_markdown || '');
+                        el.dataset.loaded = 'true';
+                        return;
+                    }
+
+                    const res = await fetch(`${API_BASE}/daily-reports/${reportId}`, { headers: getHeaders() });
+                    if (!res.ok) { bodyEl.innerHTML = '<p style="color:#999;">加载失败，请重试</p>'; return; }
+                    const data = await res.json();
+                    window._loadedReports[reportId] = data;
+                    bodyEl.innerHTML = renderMarkdown(data.content_markdown || '');
+                    el.dataset.loaded = 'true';
+                } catch(e) {
+                    bodyEl.innerHTML = '<p style="color:#999;">网络错误，请重试</p>';
+                }
+            }
+        }
+    }
+
+    async function exportReport(reportId, format) {
+        try {
+            const res = await fetch(`${API_BASE}/daily-reports/${reportId}/export?format=${format}`, { headers: getHeaders() });
+            if (!res.ok) { showToast('导出失败', 'error'); return; }
+            const data = await res.json();
+            document.getElementById('export-content').textContent = data.content;
+            document.getElementById('export-modal').classList.add('open');
+        } catch(e) {
+            showToast('网络错误', 'error');
+        }
+    }
+
+    function copyExportContent() {
+        const content = document.getElementById('export-content').textContent;
+        navigator.clipboard.writeText(content).then(() => showToast('已复制到剪贴板', 'success')).catch(() => showToast('复制失败', 'error'));
+    }
+
+    function closeExportModal() { document.getElementById('export-modal').classList.remove('open'); }
+
+    function openGenerateModal() { document.getElementById('generate-modal').classList.add('open'); }
+
+    function closeGenerateModal() {
+        document.getElementById('generate-modal').classList.remove('open');
+        if (currentTaskId && pollingInterval) {
+            document.getElementById('page-task-status').style.display = 'block';
+        } else {
+            if (pollingInterval) { clearInterval(pollingInterval); pollingInterval = null; }
+            document.getElementById('task-progress-area').style.display = 'none';
+            resetGenerateButton();
+        }
+    }
+
+    function hidePageTaskStatus() { document.getElementById('page-task-status').style.display = 'none'; }
+
+    async function generateReports() {
+        const date = document.getElementById('generate-date').value;
+        const select = document.getElementById('generate-categories');
+        const selectedCategories = Array.from(select.selectedOptions).map(o => o.value).filter(v => v);
+
+        const body = {};
+        if (date) body.report_date = date;
+        if (selectedCategories.length > 0) body.categories = selectedCategories;
+
+        document.getElementById('generate-btn').disabled = true;
+        document.getElementById('generate-btn').textContent = '启动中...';
+        document.getElementById('task-progress-area').style.display = 'block';
+        updateTaskUI({ status: 'pending', progress: 0, progress_message: '正在创建任务...' });
+
+        try {
+            const res = await fetch(`${API_BASE}/daily-reports/generate`, {
+                method: 'POST',
+                headers: getHeaders(),
+                body: JSON.stringify(body)
+            });
+            const data = await res.json();
+
+            if (data.task_id) {
+                currentTaskId = data.task_id;
+                showToast(data.message || '任务已启动，正在生成报告...', 'info');
+                startPolling(data.task_id);
+            } else if (data.success) {
+                showToast(data.message || `成功生成 ${data.reports?.length || 0} 份报告`, 'success');
+                closeGenerateModal();
+                loadReports();
+            } else {
+                showToast(data.message || '生成失败', 'error');
+                resetGenerateButton();
+            }
+        } catch(e) {
+            showToast('网络错误', 'error');
+            resetGenerateButton();
+        }
+    }
+
+    function startPolling(taskId) {
+        if (pollingInterval) clearInterval(pollingInterval);
+        pollingInterval = setInterval(async () => {
+            try {
+                const res = await fetch(`${API_BASE}/daily-reports/tasks/${taskId}`, { headers: getHeaders() });
+                if (!res.ok) { clearInterval(pollingInterval); showToast('查询任务状态失败', 'error'); resetGenerateButton(); return; }
+                const task = await res.json();
+                updateTaskUI(task);
+                if (task.status === 'completed') {
+                    clearInterval(pollingInterval);
+                    showToast('报告生成完成！', 'success');
+                    setTimeout(() => { closeGenerateModal(); resetGenerateButton(); loadReports(); }, 1500);
+                } else if (task.status === 'failed') {
+                    clearInterval(pollingInterval);
+                    showToast(`生成失败: ${task.error_message || '未知错误'}`, 'error');
+                    resetGenerateButton();
+                }
+            } catch(e) {}
+        }, 2000);
+    }
+
+    function updateTaskUI(task) {
+        const statusBox = document.getElementById('task-status-box');
+        const statusText = document.getElementById('task-status-text');
+        const progressBar = document.getElementById('task-progress-bar');
+        const progressMessage = document.getElementById('task-progress-message');
+        const spinner = document.getElementById('task-spinner');
+
+        statusBox.className = 'task-status ' + task.status;
+        const statusLabels = { 'pending': '等待中', 'running': '生成中', 'completed': '已完成', 'failed': '失败' };
+        statusText.textContent = statusLabels[task.status] || task.status;
+        progressBar.style.width = task.progress + '%';
+        progressMessage.textContent = task.progress_message || '';
+        spinner.style.display = (task.status === 'pending' || task.status === 'running') ? 'block' : 'none';
+
+        if (task.status === 'completed' || task.status === 'failed') document.getElementById('generate-btn').textContent = '完成';
+        updatePageTaskUI(task);
+    }
+
+    function updatePageTaskUI(task) {
+        const pageStatusBox = document.getElementById('page-task-box');
+        const pageStatusText = document.getElementById('page-task-text');
+        const pageProgressBar = document.getElementById('page-progress-bar');
+        const pageProgressMessage = document.getElementById('page-progress-message');
+        const pageSpinner = document.getElementById('page-task-spinner');
+
+        const statusLabels = { 'pending': '等待中', 'running': '生成中', 'completed': '已完成', 'failed': '失败' };
+        pageStatusBox.className = 'task-status ' + task.status;
+        pageStatusText.textContent = (statusLabels[task.status] || task.status) + ' - ' + (task.name || '每日报告生成');
+        pageProgressBar.style.width = task.progress + '%';
+        pageProgressMessage.textContent = task.progress_message || '';
+        pageSpinner.style.display = (task.status === 'pending' || task.status === 'running') ? 'block' : 'none';
+
+        if (task.status === 'completed' || task.status === 'failed') setTimeout(() => hidePageTaskStatus(), 3000);
+    }
+
+    function resetGenerateButton() {
+        document.getElementById('generate-btn').disabled = false;
+        document.getElementById('generate-btn').textContent = '生成';
+    }
+
+    async function checkRunningTask() {
+        try {
+            const res = await fetch(`${API_BASE}/daily-reports/tasks?status=running&limit=5`, { headers: getHeaders() });
+            if (!res.ok) return;
+            const runningTasks = await res.json();
+            const res2 = await fetch(`${API_BASE}/daily-reports/tasks?status=pending&limit=5`, { headers: getHeaders() });
+            const pendingTasks = res2.ok ? await res2.json() : [];
+            const allTasks = [...runningTasks, ...pendingTasks];
+            const activeTask = allTasks[0];
+
+            if (activeTask) {
+                currentTaskId = activeTask.task_id;
+                document.getElementById('page-task-status').style.display = 'block';
+                updatePageTaskUI(activeTask);
+                startPolling(activeTask.task_id);
+            }
+        } catch(e) {}
+    }
+
+    function renderMarkdown(md) {
+        if (!md) return '<p style="color:#999;">暂无内容</p>';
+        return parseReportToHtml(md);
+    }
+
+    function parseReportToHtml(md) {
+        const lines = md.split('\n');
+        let result = [];
+        let currentArticle = null;
+        let articleMeta = {};
+        let articleContent = [];
+
+        for (let i = 0; i < lines.length; i++) {
+            const line = lines[i];
+            if (line.match(/^#\s+/)) continue;
+            if (line.match(/^(&gt;|>)\s+/)) {
+                const count = line.replace(/^(&gt;|>)\s*/, '').trim();
+                result.push(`<div class="report-summary-badge">${escapeHtml(count)}</div>`);
+                continue;
+            }
+            if (line.match(/^---+$/)) continue;
+            if (line.match(/^##\s+.*论文列表/)) { result.push('<div class="articles-container">'); continue; }
+            if (line.match(/^##\s+.*统计/)) {
+                if (currentArticle) { result.push(renderArticleCard(currentArticle, articleMeta, articleContent)); currentArticle = null; articleMeta = {}; articleContent = []; }
+                result.push('</div>');
+                let stats = [];
+                for (let j = i + 1; j < lines.length; j++) {
+                    const statLine = lines[j];
+                    if (statLine.match(/^---+$/)) break;
+                    if (statLine.match(/^-\s+/)) stats.push(statLine.replace(/^-\s*/, '').trim());
+                }
+                if (stats.length > 0) result.push(renderStatsSection(stats));
+                break;
+            }
+            const articleMatch = line.match(/^###\s+(\d+)\.\s*(.+)$/);
+            if (articleMatch) {
+                if (currentArticle) result.push(renderArticleCard(currentArticle, articleMeta, articleContent));
+                currentArticle = { index: articleMatch[1], title: articleMatch[2] };
+                articleMeta = {};
+                articleContent = [];
+                continue;
+            }
+            if (currentArticle) {
+                const trimmedLine = line.trim();
+                if (trimmedLine.match(/^\*\*原文\*\*/)) articleMeta.originalTitle = trimmedLine.replace(/^\*\*原文\*\*:\s*/, '').replace(/\*\*/g, '');
+                else if (trimmedLine.match(/^\*\*作者\*\*/)) articleMeta.authors = trimmedLine.replace(/^\*\*作者\*\*:\s*/, '').replace(/\*\*/g, '');
+                else if (trimmedLine.match(/^\*\*链接\*\*/)) {
+                    const linkMatch = trimmedLine.match(/\[([^\]]+)\]\(([^)]+)\)/);
+                    if (linkMatch) { articleMeta.link = linkMatch[2]; articleMeta.arxivId = linkMatch[1]; }
+                } else if (trimmedLine.match(/^\*\*摘要\*\*/)) continue;
+                else if (!trimmedLine) continue;
+                else articleContent.push(trimmedLine);
+            }
+        }
+        if (currentArticle) result.push(renderArticleCard(currentArticle, articleMeta, articleContent));
+        if (result.length === 0) return renderSimpleMarkdown(md);
+        return result.join('\n');
+    }
+
+    function renderSimpleMarkdown(md) {
+        let html = escapeHtml(md);
+        html = html.replace(/^### (.+)$/gm, '<h3>$1</h3>');
+        html = html.replace(/^## (.+)$/gm, '<h2>$1</h2>');
+        html = html.replace(/^# (.+)$/gm, '<h1>$1</h1>');
+        html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+        html = html.replace(/\*(.+?)\*/g, '<em>$1</em>');
+        html = html.replace(/`(.+?)`/g, '<code>$1</code>');
+        html = html.replace(/^- (.+)$/gm, '<li>$1</li>');
+        html = html.replace(/(<li>.*<\/li>\n?)+/g, '<ul>$&</ul>');
+        html = html.replace(/^&gt; (.+)$/gm, '<blockquote>$1</blockquote>');
+        html = html.replace(/^---$/gm, '<hr>');
+        html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank">$1</a>');
+        html = html.replace(/\n\n/g, '</p><p>');
+        html = '<p>' + html + '</p>';
+        html = html.replace(/<p>\s*<\/p>/g, '');
+        return html;
+    }
+
+    function renderArticleCard(article, meta, content) {
+        const contentHtml = content.map(c => escapeHtml(c)).join('<br>');
+        const title = escapeHtml(article.title);
+        const originalTitle = meta.originalTitle ? escapeHtml(meta.originalTitle) : '';
+        const authors = meta.authors ? escapeHtml(meta.authors) : '';
+
+        return `
+            <div class="article-card">
+                <div class="article-header">
+                    <span class="article-index">#${article.index}</span>
+                    <h4 class="article-title">${title}</h4>
+                </div>
+                ${originalTitle ? `<div class="article-original-title">原文: ${originalTitle}</div>` : ''}
+                <div class="article-meta-row">
+                    ${meta.link ? `<a class="article-link" href="${escapeHtml(meta.link)}" target="_blank">查看原文</a>` : ''}
+                    ${authors ? `<span class="article-authors">${authors}</span>` : ''}
+                </div>
+                <div class="article-content">
+                    <div class="article-summary-label">摘要</div>
+                    <div class="article-summary">${contentHtml || '<em>暂无摘要</em>'}</div>
+                </div>
+            </div>
+        `;
+    }
+
+    function renderStatsSection(stats) {
+        const statsHtml = stats.map(s => {
+            const parts = s.split(':');
+            const label = escapeHtml(parts[0] || s);
+            const value = parts.length >= 2 ? escapeHtml(parts.slice(1).join(':')) : '';
+            if (value) return `<div class="stat-item"><span class="stat-label">${label}</span><span class="stat-value">${value}</span></div>`;
+            return `<div class="stat-item">${label}</div>`;
+        }).join('');
+        return `<div class="report-stats-section"><h3 class="stats-title">📊 统计信息</h3><div class="stats-grid">${statsHtml}</div></div>`;
+    }
+
+    function renderPaginationFn() {
+        renderPagination(document.getElementById('pagination'), totalReports, pageSize, currentPage, 'goToPage');
+    }
+
+    function goToPage(p) { currentPage = p; loadReports(); window.scrollTo({top:0,behavior:'smooth'}); }
+
+    function showToast(msg, type = 'info') {
+        const toast = document.createElement('div');
+        toast.className = `toast-message ${type}`;
+        toast.textContent = msg;
+        document.body.appendChild(toast);
+        setTimeout(() => toast.remove(), 3000);
+    }
+
+    checkAuth().then(() => {
+        loadCategories();
+        loadReports();
+        checkRunningTask();
+    });
+</script>
+{% endblock %}

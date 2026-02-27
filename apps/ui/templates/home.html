@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Home - Web Services</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .container {
+            text-align: center;
+            padding: 40px;
+        }
+
+        .header {
+            margin-bottom: 60px;
+        }
+
+        .header h1 {
+            font-size: 48px;
+            color: white;
+            font-weight: 700;
+            margin-bottom: 12px;
+            text-shadow: 0 2px 10px rgba(0,0,0,0.2);
+        }
+
+        .header p {
+            font-size: 18px;
+            color: rgba(255,255,255,0.85);
+        }
+
+        .services-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 24px;
+            max-width: 900px;
+            margin: 0 auto;
+        }
+
+        .service-card {
+            background: white;
+            border-radius: 16px;
+            padding: 32px;
+            text-decoration: none;
+            color: inherit;
+            transition: all 0.3s ease;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.1);
+        }
+
+        .service-card:hover {
+            transform: translateY(-8px);
+            box-shadow: 0 20px 60px rgba(0,0,0,0.15);
+        }
+
+        .service-icon {
+            width: 64px;
+            height: 64px;
+            border-radius: 16px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 28px;
+            margin-bottom: 20px;
+        }
+
+        .service-icon.research {
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            color: #4ecdc4;
+        }
+
+        .service-icon.default {
+            background: linear-gradient(135deg, #f5f5f5 0%, #e0e0e0 100%);
+            color: #666;
+        }
+
+        .service-card h3 {
+            font-size: 20px;
+            font-weight: 600;
+            color: #1a1a2e;
+            margin-bottom: 8px;
+        }
+
+        .service-card p {
+            font-size: 14px;
+            color: #666;
+            line-height: 1.6;
+        }
+
+        .service-card .arrow {
+            margin-top: 16px;
+            color: #4ecdc4;
+            font-size: 14px;
+            font-weight: 500;
+        }
+
+        .service-card:hover .arrow {
+            transform: translateX(4px);
+        }
+
+        .badge {
+            display: inline-block;
+            padding: 4px 10px;
+            border-radius: 4px;
+            font-size: 11px;
+            font-weight: 600;
+            margin-left: 8px;
+        }
+
+        .badge.active {
+            background: #dcfce7;
+            color: #059669;
+        }
+
+        .badge.coming {
+            background: #fef3c7;
+            color: #d97706;
+        }
+
+        .footer {
+            margin-top: 60px;
+            color: rgba(255,255,255,0.6);
+            font-size: 13px;
+        }
+
+        .footer a {
+            color: rgba(255,255,255,0.8);
+            text-decoration: none;
+        }
+
+        .footer a:hover {
+            color: white;
+        }
+
+        /* Responsive - Mobile */
+        @media (max-width: 768px) {
+            .container {
+                padding: 24px 16px;
+            }
+            .header {
+                margin-bottom: 40px;
+            }
+            .header h1 {
+                font-size: 32px;
+            }
+            .header p {
+                font-size: 15px;
+            }
+            .services-grid {
+                grid-template-columns: 1fr;
+                gap: 16px;
+            }
+            .service-card {
+                padding: 24px;
+            }
+            .service-icon {
+                width: 56px;
+                height: 56px;
+                font-size: 24px;
+                border-radius: 12px;
+            }
+            .service-card h3 {
+                font-size: 18px;
+            }
+            .service-card p {
+                font-size: 13px;
+            }
+            .footer {
+                margin-top: 40px;
+            }
+        }
+
+        /* Responsive - Small Mobile */
+        @media (max-width: 480px) {
+            .header h1 {
+                font-size: 26px;
+            }
+            .service-card {
+                padding: 20px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🌐 Web Services</h1>
+            <p>一站式 Web 服务导航</p>
+        </div>
+
+        <div class="services-grid">
+            <!-- ResearchPulse -->
+            <a href="researchpulse/" class="service-card">
+                <div class="service-icon research">📚</div>
+                <h3>ResearchPulse <span class="badge active">在线</span></h3>
+                <p>学术资讯聚合平台，订阅跟踪 arXiv、RSS、微信公众号等来源的最新研究动态</p>
+                <div class="arrow">访问服务 →</div>
+            </a>
+
+            <!-- Placeholder for future services -->
+            <a href="#" class="service-card" style="opacity: 0.6; pointer-events: none;">
+                <div class="service-icon default">🔧</div>
+                <h3>更多服务 <span class="badge coming">敬请期待</span></h3>
+                <p>更多实用的 Web 服务正在开发中...</p>
+                <div class="arrow">敬请期待</div>
+            </a>
+        </div>
+
+        <div class="footer">
+            <p>
+                <a href="/docs">API 文档</a> ·
+                <a href="/health">系统状态</a>
+            </p>
+            <p style="margin-top: 12px;">© 2025 Web Services. All rights reserved.</p>
+        </div>
+    </div>
+</body>
+</html>
