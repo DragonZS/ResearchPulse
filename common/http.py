@@ -660,7 +660,9 @@ async def get_text_async(
             last_error = exc
 
             # SSL 握手失败（record layer failure / 协议不兼容）无法通过普通重试解决。
-            # 立即用宽松 SSL 上下文重试一次，成功后直接返回，跳过后续重试循环。
+            # 降级策略（依次尝试）：
+            #   1. 宽松 SSL 上下文（允许旧 TLS 版本）
+            #   2. 回退 HTTP 明文请求（部分国内站点 443 端口未启用 TLS）
             if isinstance(exc, httpx.ConnectError) and _is_ssl_error(exc):
                 logger.warning(
                     "SSL handshake failed for %s, retrying with relaxed SSL context", url
@@ -687,8 +689,36 @@ async def get_text_async(
                     logger.debug(
                         "Relaxed SSL retry also failed for %s: %s", url, ssl_retry_exc
                     )
-                    last_error = ssl_retry_exc
-                    break  # SSL 兼容性问题，继续重试无意义
+
+                # 宽松 SSL 也失败：尝试回退到 HTTP 明文（某些站点 443 端口未启用 TLS）
+                if url.startswith("https://"):
+                    http_url = "http://" + url[len("https://"):]
+                    logger.warning(
+                        "SSL unavailable for %s, falling back to HTTP: %s", url, http_url
+                    )
+                    try:
+                        async with httpx.AsyncClient(
+                            timeout=req_timeout,
+                            follow_redirects=True,
+                            http2=False,
+                        ) as plain_client:
+                            ua = _get_user_agent()
+                            req_headers = _build_headers(ua, referer=referer)
+                            plain_resp = await plain_client.get(
+                                http_url, params=params, timeout=req_timeout, headers=req_headers
+                            )
+                            plain_resp.raise_for_status()
+                            if cache_ttl > 0:
+                                cache_response(url, plain_resp.text, params)
+                            _consecutive_errors = 0
+                            return plain_resp.text
+                    except Exception as http_retry_exc:
+                        logger.debug(
+                            "HTTP fallback also failed for %s: %s", http_url, http_retry_exc
+                        )
+                        last_error = http_retry_exc
+
+                break  # SSL 和 HTTP 均失败，继续重试无意义
 
             _consecutive_errors += 1
             if _consecutive_errors >= _CONSECUTIVE_ERRORS_BEFORE_ROTATE:
